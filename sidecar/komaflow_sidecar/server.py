@@ -89,8 +89,12 @@ def make_handler(token: str, jobs: JobQueue):
     class Handler(BaseHTTPRequestHandler):
         server_version = f"komaflow-sidecar/{__version__}"
 
-        def log_message(self, fmt: str, *args: Any) -> None:  # quiet; desktop collects stderr
-            sys.stderr.write("[sidecar] " + (fmt % args) + "\n")
+        def log_message(self, fmt: str, *args: Any) -> None:
+            # job polling (GET /jobs/…, 200) every half second would flood sidecar.log: log the rest only
+            line = fmt % args
+            if '"GET /jobs/' in line and '" 200 ' in line:
+                return
+            sys.stderr.write("[sidecar] " + line + "\n")
 
         def _send(self, code: int, body: Any) -> None:
             data = json.dumps(body, ensure_ascii=False).encode("utf-8")

@@ -74,6 +74,9 @@ def main(argv: list[str] | None = None) -> int:
     sv.add_argument("--token", required=True)
     sv.add_argument("--port", type=int, default=0)
     sub.add_parser("capabilities")
+    dr = sub.add_parser("doctor", help="check the engine and every installed model; saves a report")
+    dr.add_argument("--backend", default="auto", choices=["auto", "rocm", "cpu"])
+    dr.add_argument("--load-timeout", type=float, default=900.0, help="seconds to wait for one model to load")
     ins = sub.add_parser("install")
     ins.add_argument("--backends", default="rocm,cpu")
     ins.add_argument("--models", default="layout,ocr,lama")
@@ -87,6 +90,10 @@ def main(argv: list[str] | None = None) -> int:
 
         serve(a.token, a.port)
         return 0
+    if a.cmd == "doctor":
+        from .doctor import run
+
+        return run(a.backend, a.load_timeout)
     if a.cmd == "capabilities":
         from .backend import capabilities
 

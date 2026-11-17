@@ -12,7 +12,7 @@
   "app": {
     "windows": [{ "title": "komaflow", "width": 1440, "height": 900, "minWidth": 1024, "minHeight": 640 }],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' asset: http://asset.localhost blob: data:; style-src 'self' 'unsafe-inline'; connect-src 'self' ipc: http://ipc.localhost asset: http://asset.localhost",
+      "csp": "default-src 'self'; img-src 'self' asset: http://asset.localhost blob: data:; style-src 'self' 'unsafe-inline'; connect-src 'self' ipc: http://ipc.localhost asset: http://asset.localhost blob: data:",
       "assetProtocol": { "enable": true, "scope": [] }
     }
   },

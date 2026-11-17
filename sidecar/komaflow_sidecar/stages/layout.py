@@ -108,6 +108,9 @@ class Fake(StageBase):
         self.job = job
 
     def load(self) -> dict:
+        import sys
+
+        sys.stdin.isatty()  # real model libraries do this while importing; must not hang (ADR 0016)
         return {"model": "fake-layout", "backend": self.job.get("backend")}
 
     def run(self, item: dict) -> dict:

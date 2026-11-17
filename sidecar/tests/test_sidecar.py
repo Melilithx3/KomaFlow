@@ -314,3 +314,23 @@ def test_cancel_keeps_the_worker_when_it_stops_in_time(pages, monkeypatch):
     with pytest.raises(Cancelled):
         analyze_batch(pages, {"stages": ["layout"]}, ctl)
     assert [w["state"] for w in pool().stats()] == ["ready"]
+
+
+
+def test_doctor_reports_every_model(capsys):
+    from komaflow_sidecar.doctor import run
+
+    assert run("auto", 60) == 0
+    out = capsys.readouterr().out
+    for stage in ("layout (cold)", "layout (warm)", "ocr (cold)", "inpaint (warm)"):
+        assert f"[OK]   {stage}" in out
+    assert "all checks passed" in out
+    assert "report saved:" in out
+
+
+def test_worker_stdin_is_not_a_pipe(pages):
+    """Workers get stdin=DEVNULL and talk over a socket: stdin checks in model libraries cannot block."""
+    from komaflow_sidecar.pool import pool
+
+    analyze_batch(pages, {"stages": ["layout"]}, Control())
+    assert pool().stats()[0]["state"] == "ready"

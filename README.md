@@ -41,4 +41,4 @@ pnpm dev:server      # terminal 1
 pnpm dev:web         # terminal 2, open http://localhost:5173
 ```
 
-Build instructions (Russian): [`docs/BUILD.md`](docs/BUILD.md), updating an installation: [`docs/UPDATE.md`](docs/UPDATE.md). All commands: `CLAUDE.md` → «Команды». Operator guide: [`deploy/README.md`](deploy/README.md).
+Build instructions (Russian): [`docs/BUILD.md`](docs/BUILD.md), updating an installation: [`docs/UPDATE.md`](docs/UPDATE.md), diagnostics: [`docs/DIAGNOSTICS.md`](docs/DIAGNOSTICS.md). All commands: `CLAUDE.md` → «Команды». Operator guide: [`deploy/README.md`](deploy/README.md).

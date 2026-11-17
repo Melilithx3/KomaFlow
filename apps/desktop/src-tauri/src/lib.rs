@@ -389,6 +389,8 @@ fn sidecar_start(app: tauri::AppHandle, state: State<'_, SidecarState>) -> CmdRe
     cmd.args(["-m", "komaflow_sidecar", "serve", "--token", &token])
         .env("PYTHONPATH", &src)
         .env("PYTHONUTF8", "1")
+        .env("PYTHONIOENCODING", "utf-8")
+        .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::from(log));
     #[cfg(windows)]

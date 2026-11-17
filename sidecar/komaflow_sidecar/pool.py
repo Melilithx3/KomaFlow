@@ -12,6 +12,8 @@ import atexit
 import json
 import os
 import queue
+import secrets
+import socket
 import subprocess
 import threading
 import time
@@ -25,6 +27,12 @@ if TYPE_CHECKING:
     from .pipeline import Control
 
 CANCEL_GRACE_S = float(os.environ.get("KOMAFLOW_SIDECAR_CANCEL_GRACE", "3"))
+CONNECT_TIMEOUT_S = 180.0  # Python + torch start-up of the worker
+
+
+def load_timeout_s() -> float:
+    """A cold model (download-free, but first MIOpen compile) may take minutes; never wait forever."""
+    return float(os.environ.get("KOMAFLOW_SIDECAR_LOAD_TIMEOUT", "900"))
 
 
 def idle_limit_s() -> float:
@@ -52,14 +60,16 @@ class Worker:
     loads: int = 0
     last_used: float = field(default_factory=time.monotonic)
     run_seq: int = 0
+    conn: socket.socket | None = None
+    connected: threading.Event = field(default_factory=threading.Event)
 
     def send(self, cmd: dict) -> None:
-        assert self.proc.stdin is not None
+        if not self.connected.wait(CONNECT_TIMEOUT_S) or self.conn is None:
+            raise WorkerError(f"{self.stage} worker did not connect:\n{self.stderr_tail()}")
         try:
-            self.proc.stdin.write(json.dumps(cmd, ensure_ascii=False) + "\n")
-            self.proc.stdin.flush()
+            self.conn.sendall((json.dumps(cmd, ensure_ascii=False) + "\n").encode("utf-8"))
         except OSError as e:
-            raise WorkerError(f"{self.stage} worker is gone: {e}") from e
+            raise WorkerError(f"{self.stage} worker is gone: {e}\n{self.stderr_tail()}") from e
 
     def next_event(self, timeout: float | None) -> dict | None:
         try:
@@ -84,6 +94,11 @@ class Worker:
             self.proc.kill()
         except OSError:
             pass
+        if self.conn is not None:
+            try:
+                self.conn.close()
+            except OSError:
+                pass
 
 
 class Pool:
@@ -97,29 +112,56 @@ class Pool:
         logs = paths.logs_dir()
         logs.mkdir(parents=True, exist_ok=True)
         log_path = str(logs / f"worker-{stage}-{backend}.log")
-        err = open(log_path, "a", encoding="utf-8")  # noqa: SIM115 - owned by the process
+        log = open(log_path, "a", encoding="utf-8")  # noqa: SIM115 - owned by the process
+        log.write(f"\n==== {time.strftime('%Y-%m-%d %H:%M:%S')} start {stage} on {backend}\n")
+        log.flush()
+        listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        listener.settimeout(CONNECT_TIMEOUT_S)
+        token = secrets.token_hex(16)
         proc = subprocess.Popen(
-            [str(be.stage_python(backend)), "-m", "komaflow_sidecar.worker", stage],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=err,
-            text=True,
-            encoding="utf-8",
+            [str(be.stage_python(backend)), "-u", "-m", "komaflow_sidecar.worker", stage, str(listener.getsockname()[1]), token],
+            stdin=subprocess.DEVNULL,  # never a pipe: see worker.py
+            stdout=log,
+            stderr=subprocess.STDOUT,
             env=paths.stage_env(),
+            **_no_window(),
         )
         w = Worker(stage, backend, job["model_dir"], proc, log_path)
 
         def pump() -> None:
-            assert proc.stdout is not None
-            for line in proc.stdout:
-                try:
-                    w.events.put(json.loads(line))
-                except json.JSONDecodeError:
-                    continue
+            try:
+                conn, _ = listener.accept()
+            except OSError:
+                w.events.put(None)
+                return
+            finally:
+                listener.close()
+            conn.settimeout(None)
+            rfile = conn.makefile("r", encoding="utf-8", newline="\n")
+            try:
+                hello = json.loads(rfile.readline() or "{}")
+            except json.JSONDecodeError:
+                hello = {}
+            if hello.get("token") != token:
+                conn.close()
+                w.events.put(None)
+                return
+            w.conn = conn
+            w.connected.set()
+            try:
+                for line in rfile:
+                    try:
+                        w.events.put(json.loads(line))
+                    except json.JSONDecodeError:
+                        continue
+            except OSError:
+                pass
             w.events.put(None)
 
         threading.Thread(target=pump, daemon=True).start()
-        w.send({"cmd": "load", "job": job})
+        threading.Thread(target=_send_quietly, args=(w, {"cmd": "load", "job": job}), daemon=True).start()
         return w
 
     def _get(self, stage: str, backend: str, job: dict, ctl: "Control") -> Worker:
@@ -136,9 +178,16 @@ class Pool:
             from .pipeline import Progress
 
             ctl.on_progress(Progress(f"{stage}:loading", 0, len(job["items"])))
+            started = time.monotonic()
             while True:
                 ev = w.next_event(timeout=1.0)
                 if ev["event"] == "_timeout":
+                    if w.proc.poll() is not None:
+                        self._drop(w)
+                        raise WorkerError(f"{stage} worker exited while loading (code {w.proc.returncode}):\n{w.stderr_tail()}")
+                    if time.monotonic() - started > load_timeout_s():
+                        self._drop(w)
+                        raise WorkerError(f"{stage} model did not load in {load_timeout_s():.0f} s:\n{w.stderr_tail()}")
                     if ctl.cancel.is_set():
                         self._drop(w)
                         from .pipeline import Cancelled
@@ -193,6 +242,9 @@ class Pool:
                 ev = w.next_event(timeout=0.25)
                 kind = ev["event"]
                 if kind == "_timeout":
+                    if w.proc.poll() is not None:
+                        self._drop(w)
+                        raise WorkerError(f"{stage} worker died (code {w.proc.returncode}):\n{w.stderr_tail()}")
                     if ctl.cancel.is_set():
                         if cancel_sent_at is None:
                             w.send({"cmd": "cancel"})
@@ -261,3 +313,18 @@ def pool() -> Pool:
         _pool = Pool()
         atexit.register(_pool.shutdown)
     return _pool
+
+
+def _no_window() -> dict:
+    """No console window for workers on Windows."""
+    if os.name == "nt":
+        return {"creationflags": 0x08000000}  # CREATE_NO_WINDOW
+    return {}
+
+
+def _send_quietly(w: Worker, cmd: dict) -> None:
+    """The first command waits for the connection; a failure surfaces as a dead worker."""
+    try:
+        w.send(cmd)
+    except WorkerError:
+        w.events.put(None)

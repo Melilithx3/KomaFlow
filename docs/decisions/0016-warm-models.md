@@ -3,7 +3,7 @@
 **Context.** User requirement (2026-11-18): models that already ran must stay loaded, so repeated layout/OCR and especially LaMa clean do not wait for loading and MIOpen warm-up. docs/05 §11 ran each stage in a process that exited after the stage; VRAM (12 GB) still fits only one heavy model at a time.
 
 **Decision.**
-- One long-lived worker process per model and backend (`python -m komaflow_sidecar.worker <stage>`), JSON lines over stdin/stdout. It loads its model once; later jobs reuse it.
+- One long-lived worker process per model and backend (`python -m komaflow_sidecar.worker <stage> <port> <token>`). Commands/events are JSON lines over a localhost TCP connection; worker stdin is /dev/null. (First version used stdin/stdout pipes: on Windows a thread blocked reading a pipe freezes code that inspects the handle, e.g. `isatty` during torch/transformers import, so real models hung while loading.) Loading has a timeout (`KOMAFLOW_SIDECAR_LOAD_TIMEOUT`, 900 s); errors carry the worker log tail. It loads its model once; later jobs reuse it.
 - Before a model runs on ROCm the other GPU workers are *parked*: weights move to CPU RAM and `torch.cuda.empty_cache()` frees VRAM, the process and kernels stay alive. Unparking is a memory copy (seconds), not a reload.
 - Workers exit after `KOMAFLOW_SIDECAR_IDLE_MIN` minutes without work (default 60, 0 = never) and when the sidecar stops.
 - Cancel asks the worker to stop after the current item; if it does not within `KOMAFLOW_SIDECAR_CANCEL_GRACE` s (3) it is killed (the only case a model is lost).
