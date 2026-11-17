@@ -44,7 +44,9 @@ export class Store {
 
   subscribe = (fn: () => void) => {
     this.listeners.add(fn);
-    return () => this.listeners.delete(fn);
+    return () => {
+      this.listeners.delete(fn);
+    };
   };
 
   private set(next: Partial<EditorState>) {
