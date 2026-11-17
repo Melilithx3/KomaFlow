@@ -186,7 +186,7 @@ export const ExportStatus = z.object({
 });
 export type ExportStatus = z.infer<typeof ExportStatus>;
 
-export const SKIP_PAGE_REASONS = ['not_ready', 'no_clean', 'not_selected'] as const;
+export const SKIP_PAGE_REASONS = ['not_ready', 'no_clean', 'no_layers'] as const;
 
 /** `manifest.json` inside the export zip (docs/04-psd.md §4). */
 export const ManifestPage = z.object({
@@ -206,16 +206,6 @@ export const ManifestPage = z.object({
     translation: Sha256,
     settings: Sha256,
   }),
-  objects: z.array(
-    z.object({
-      id: Id,
-      order: z.number().int(),
-      type: ObjectType,
-      geometry_ver: z.number().int(),
-      text_ver: z.number().int(),
-    }),
-  ),
-  skipped_objects: z.array(z.object({ id: Id, reason: z.string() })),
 });
 export type ManifestPage = z.infer<typeof ManifestPage>;
 

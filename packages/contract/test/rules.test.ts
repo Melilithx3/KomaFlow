@@ -157,20 +157,35 @@ describe('psdInputHash', () => {
       },
     ],
   };
-  it('is stable and sensitive to relevant fields', () => {
+  const withTranslation = (t: string) => ({ ...input, objects: [{ ...input.objects[0]!, translation: t }] });
+  it('MVP: translation, markup and font settings do not affect the hash', () => {
     const h = psdInputHash(input);
     expect(h).toMatch(/^[0-9a-f]{64}$/);
     expect(psdInputHash(structuredClone(input))).toBe(h);
-    expect(psdInputHash({ ...input, objects: [{ ...input.objects[0]!, translation: 'Нет' }] })).not.toBe(h);
+    expect(psdInputHash(withTranslation('Нет'))).toBe(h);
+    expect(psdInputHash({ ...input, objects: [] })).toBe(h);
+    expect(psdInputHash({ ...input, psd_settings: { ...DEFAULT_PSD_SETTINGS, default_font: 'X' } })).toBe(h);
+  });
+  it('clean, notes, layer flags and raw/notes settings do', () => {
+    const h = psdInputHash(input);
+    expect(psdInputHash({ ...input, clean_hash: 'c'.repeat(64) })).not.toBe(h);
+    expect(psdInputHash({ ...input, notes_hash: 'd'.repeat(64) })).not.toBe(h);
     expect(psdInputHash({ ...input, layers: { ...input.layers, raw: false } })).not.toBe(h);
+    expect(psdInputHash({ ...input, psd_settings: { ...DEFAULT_PSD_SETTINGS, notes_opacity: 50 } })).not.toBe(h);
+  });
+  it('disabled layers ignore their files', () => {
+    const noClean = { ...input, layers: { ...input.layers, clean: false } };
+    expect(psdInputHash({ ...noClean, clean_hash: 'c'.repeat(64) })).toBe(psdInputHash(noClean));
+  });
+  it('with text layers (post-MVP) translation counts', () => {
+    const t = { ...input, layers: { ...input.layers, text: true } };
+    expect(psdInputHash({ ...t, objects: withTranslation('Нет').objects })).not.toBe(psdInputHash(t));
   });
   it('explains staleness by parts', () => {
     const before = psdHashParts(input);
-    const after = psdHashParts({
-      ...input,
-      clean_hash: 'c'.repeat(64),
-      objects: [{ ...input.objects[0]!, translation: 'Нет' }],
-    });
-    expect(staleReasons(before, after)).toEqual(['clean', 'translation']);
+    const after = psdHashParts({ ...withTranslation('Нет'), clean_hash: 'c'.repeat(64) });
+    expect(staleReasons(before, after)).toEqual(['clean']);
+    const s2 = psdHashParts({ ...input, psd_settings: { ...DEFAULT_PSD_SETTINGS, raw_layer_visible: true } });
+    expect(staleReasons(before, s2)).toEqual(['settings']);
   });
 });
