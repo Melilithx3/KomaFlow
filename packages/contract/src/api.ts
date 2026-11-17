@@ -98,6 +98,13 @@ export const SyncObject = z.strictObject({
   text_box: Box.nullable().optional(),
   rotation: Rotation.optional(),
   source_text: z.string().max(LIMITS.source_text).optional(),
+  /**
+   * Server value of source_text the desktop last saw (ADR 0013). For an existing object the server takes
+   * `source_text` only if its current value still equals this base (or the web never edited it).
+   */
+  source_text_base: z.string().max(LIMITS.source_text).nullable().optional(),
+  /** Overwrite the server's source_text even if the web changed it («Перезаписать сервер»). */
+  source_text_force: z.boolean().optional(),
 });
 export type SyncObject = z.infer<typeof SyncObject>;
 
@@ -117,8 +124,21 @@ export type SyncPage = z.infer<typeof SyncPage>;
 
 export const SyncRequest = z.strictObject({ pages: z.array(SyncPage).min(1).max(1000) });
 export type SyncRequest = z.infer<typeof SyncRequest>;
+export const SourceConflict = z.object({ id: Id, server_source_text: z.string(), desktop_source_text: z.string() });
+export type SourceConflict = z.infer<typeof SourceConflict>;
 export const SyncResponse = z.object({
-  pages: z.array(z.object({ id: Id, markup_rev: z.number().int(), changed: z.boolean(), summary: MarkupSummary })),
+  pages: z.array(
+    z.object({
+      id: Id,
+      markup_rev: z.number().int(),
+      changed: z.boolean(),
+      summary: MarkupSummary,
+      /** Existing objects whose source_text was taken from the desktop. */
+      source_updated: z.array(Id),
+      /** source_text edited in the web since the desktop's base: not applied. */
+      source_conflicts: z.array(SourceConflict),
+    }),
+  ),
 });
 export type SyncResponse = z.infer<typeof SyncResponse>;
 

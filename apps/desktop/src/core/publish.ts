@@ -25,8 +25,23 @@ export type PublishEvent =
   | { kind: 'upload'; done: number; total: number; bytes: number; totalBytes: number }
   | { kind: 'retry'; hash: string; attempt: number; error: string };
 
+export interface SourceConflictItem {
+  pageId: string;
+  pageIdx: number;
+  objectId: string;
+  order: number;
+  server: string;
+  desktop: string;
+}
+
 export type PublishResult =
-  | { kind: 'ok'; pages: Array<{ id: string; markup_rev: number; changed: boolean; summary: MarkupSummary }>; ws: Workspace }
+  | {
+      kind: 'ok';
+      pages: Array<{ id: string; markup_rev: number; changed: boolean; summary: MarkupSummary; source_updated: string[] }>;
+      ws: Workspace;
+      /** Originals edited in the web since the desktop last saw them: not sent (ADR 0013). */
+      sourceConflicts: SourceConflictItem[];
+    }
   | { kind: 'conflict'; pages: Array<{ id: string; markup_rev: number | null }> }
   | { kind: 'nothing' };
 
@@ -35,6 +50,8 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 export interface PublishOptions {
   /** «Перезаписать сервер»: use these server revisions as base for the listed pages. */
   overwriteRevs?: Map<string, number | null>;
+  /** Object ids whose original overwrites the web's version. */
+  forceSource?: ReadonlySet<string>;
   retryDelayMs?: number;
   concurrency?: number;
   onEvent?: (e: PublishEvent) => void;
@@ -95,7 +112,7 @@ export async function publish(host: Host, api: ApiClient, ws0: Workspace, opts: 
   emit({ kind: 'stage', stage: 'sync' });
   const body = {
     pages: toSend.map((p) => {
-      const sp = toSyncPage(p);
+      const sp = toSyncPage(p, opts.forceSource);
       if (opts.overwriteRevs?.has(p.id)) sp.base_markup_rev = opts.overwriteRevs.get(p.id)!;
       return sp;
     }),
@@ -103,12 +120,29 @@ export async function publish(host: Host, api: ApiClient, ws0: Workspace, opts: 
   for (let attempt = 0; ; attempt++) {
     try {
       const res = await api.sync(ws.server!.chapter_id, body);
-      const revs = new Map(res.pages.map((p) => [p.id, p.markup_rev]));
+      const byId = new Map(res.pages.map((p) => [p.id, p]));
+      const sourceConflicts: SourceConflictItem[] = [];
       ws = {
         ...ws,
-        pages: ws.pages.map((p) => (revs.has(p.id) ? { ...p, server_markup_rev: revs.get(p.id)!, published_digest: pageDigest(p) } : p)),
+        pages: ws.pages.map((p) => {
+          const r = byId.get(p.id);
+          if (!r) return p;
+          const conflicted = new Map(r.source_conflicts.map((c) => [c.id, c]));
+          const objects = p.objects.map((o, i) => {
+            const c = conflicted.get(o.id);
+            if (c) {
+              sourceConflicts.push({ pageId: p.id, pageIdx: p.idx, objectId: o.id, order: i + 1, server: c.server_source_text, desktop: c.desktop_source_text });
+              return o;
+            }
+            // the server now holds what we sent (new object, applied original, or already equal)
+            return o.server_source === o.source_text ? o : { ...o, server_source: o.source_text };
+          });
+          const next = { ...p, objects, server_markup_rev: r.markup_rev };
+          // a page with unresolved originals stays «изменена после публикации»
+          return { ...next, published_digest: conflicted.size ? p.published_digest : pageDigest(next) };
+        }),
       };
-      return { kind: 'ok', pages: res.pages, ws };
+      return { kind: 'ok', pages: res.pages, ws, sourceConflicts };
     } catch (e) {
       if (e instanceof ApiFailure && e.code === 'BLOBS_MISSING' && attempt < 3) {
         const more = ((e.details?.missing as string[] | undefined) ?? []).map((h) => byHash.get(h)).filter((f): f is FileRef => !!f);
@@ -168,6 +202,7 @@ export async function downloadChapter(
         text_box: o.text_box,
         rotation: o.rotation ?? 0,
         source_text: o.source_text,
+        server_source: o.source_text,
         origin: 'manual',
         touched: false,
         web: webOf(o),
@@ -190,20 +225,27 @@ export async function downloadChapter(
   };
 }
 
-/** Flags and comments from the web (docs/05 §4.5) — the only data flowing back; never undoable. */
+/** Flags, comments and web edits of originals (docs/05 §4.5, ADR 0013); never undoable. */
 export async function refreshWebData(api: ApiClient, ws: Workspace): Promise<Workspace> {
   const pages = await Promise.all(
     ws.pages.map(async (p) => {
       if (p.server_markup_rev === null) return p;
       try {
         const d = await api.page(p.id);
-        const web = new Map([...d.objects, ...d.deleted_objects].map((o) => [o.id, webOf(o)]));
+        const server = new Map([...d.objects, ...d.deleted_objects].map((o) => [o.id, o]));
         let changed = false;
         const objects = p.objects.map((o) => {
-          const w = web.get(o.id);
-          if (!w || JSON.stringify(w) === JSON.stringify(o.web)) return o;
-          changed = true;
-          return { ...o, web: w };
+          const so = server.get(o.id);
+          if (!so) return o;
+          const w = webOf(so);
+          let n = o;
+          if (JSON.stringify(w) !== JSON.stringify(o.web)) n = { ...n, web: w };
+          // the original was edited in the web and the desktop did not change it locally: take it
+          if (o.server_source !== undefined && so.source_text !== o.server_source && o.source_text === o.server_source) {
+            n = { ...n, source_text: so.source_text, server_source: so.source_text };
+          }
+          if (n !== o) changed = true;
+          return n;
         });
         return changed ? { ...p, objects } : p;
       } catch (e) {

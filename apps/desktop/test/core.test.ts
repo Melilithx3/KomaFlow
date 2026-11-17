@@ -244,6 +244,46 @@ describe('publish / download against the real server', () => {
     expect((await api.page(page.id)).objects[0]!.rotation).toBe(12);
   });
 
+  it('originals of published objects reach the server; web edits win unless overwritten', async () => {
+    const s = await linkedWorkspace();
+    const r = await publish(host, api, s.get().ws);
+    if (r.kind !== 'ok') throw new Error('x');
+    s.reset(r.ws);
+    const pg = s.get().ws.pages[0]!;
+    const [a, b] = pg.objects;
+    // desktop re-OCR of an existing object → updated on the server
+    s.exec(SetSourceText(pg.id, a!.id, 'NEW OCR'));
+    const r2 = await publish(host, api, s.get().ws);
+    expect(r2.kind === 'ok' && r2.pages[0]!.source_updated).toEqual([a!.id]);
+    expect((await api.page(pg.id)).objects.find((o) => o.id === a!.id)!.source_text).toBe('NEW OCR');
+    if (r2.kind !== 'ok') return;
+    s.reset(r2.ws);
+    expect(planPublish(s.get().ws).changedPages).toHaveLength(0);
+    // translator fixes b in the web; the desktop also changes b → conflict, nothing overwritten
+    const web = await t.login('bob', 'web');
+    await web.req('PATCH', `/objects/${b!.id}`, { base_text_ver: 0, changes: { source_text: 'web fix' } });
+    s.exec(SetSourceText(pg.id, b!.id, 'desktop B'));
+    const r3 = await publish(host, api, s.get().ws);
+    expect(r3.kind === 'ok' && r3.sourceConflicts).toEqual([expect.objectContaining({ objectId: b!.id, server: 'web fix', desktop: 'desktop B' })]);
+    expect((await api.page(pg.id)).objects.find((o) => o.id === b!.id)!.source_text).toBe('web fix');
+    if (r3.kind !== 'ok') return;
+    // «Перезаписать мой вариант»
+    const r4 = await publish(host, api, r3.ws, { forceSource: new Set([b!.id]) });
+    expect(r4.kind === 'ok' && r4.sourceConflicts).toEqual([]);
+    expect((await api.page(pg.id)).objects.find((o) => o.id === b!.id)!.source_text).toBe('desktop B');
+  });
+
+  it('web edits of originals flow back when the desktop did not change them', async () => {
+    const s = await linkedWorkspace();
+    const r = await publish(host, api, s.get().ws);
+    if (r.kind !== 'ok') throw new Error('x');
+    const o = r.ws.pages[0]!.objects[0]!;
+    const web = await t.login('bob', 'web');
+    await web.req('PATCH', `/objects/${o.id}`, { base_text_ver: 0, changes: { source_text: 'Fixed in web' } });
+    const ws2 = await refreshWebData(api, r.ws);
+    expect(ws2.pages[0]!.objects[0]).toMatchObject({ source_text: 'Fixed in web', server_source: 'Fixed in web' });
+  });
+
   it('BLOBS_MISSING after check (file removed on server) is uploaded and retried', async () => {
     const s = await linkedWorkspace();
     const r = await publish(host, api, s.get().ws);

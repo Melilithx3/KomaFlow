@@ -17,6 +17,8 @@ export interface LocalObject {
   /** Degrees around the box centre, clockwise (ADR 0011). Missing in old workspaces = 0. */
   rotation?: number;
   source_text: string;
+  /** source_text on the server as last seen by this desktop (base for sync, ADR 0013); undefined = never synced. */
+  server_source?: string;
   /** 'auto' — from analysis; 'manual' — drawn by hand (docs/05 §3). */
   origin: 'auto' | 'manual';
   /** An auto object the user changed: re-analysis keeps it. */

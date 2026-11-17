@@ -39,7 +39,7 @@ export function pageDigest(p: LocalPage): string {
         raw: p.raw.hash,
         clean: p.clean?.hash ?? null,
         notes: p.notes?.hash ?? null,
-        objects: p.objects.map((o) => ({ id: o.id, type: o.type, box: o.box, text_box: o.text_box, rotation: o.rotation ?? 0 })),
+        objects: p.objects.map((o) => ({ id: o.id, type: o.type, box: o.box, text_box: o.text_box, rotation: o.rotation ?? 0, source_text: o.source_text })),
       }),
     ),
   );
@@ -52,8 +52,8 @@ export function pageStatus(p: LocalPage): PageLocalStatus {
   return { analyzed: p.analyzed, hasClean: !!p.clean, published, changedSincePublish: published && p.published_digest !== pageDigest(p) };
 }
 
-/** Payload page for POST /chapters/{id}/sync. `source_text` is accepted by the server only for new objects. */
-export function toSyncPage(p: LocalPage): SyncPage {
+/** Payload page for POST /chapters/{id}/sync. Originals of existing objects are applied by the server per ADR 0013. */
+export function toSyncPage(p: LocalPage, forceSource?: ReadonlySet<string>): SyncPage {
   return {
     id: p.id,
     idx: p.idx,
@@ -64,7 +64,16 @@ export function toSyncPage(p: LocalPage): SyncPage {
     notes_hash: p.notes?.hash ?? null,
     thumb_hash: p.thumb?.hash ?? null,
     base_markup_rev: p.server_markup_rev,
-    objects: p.objects.map((o) => ({ id: o.id, type: o.type, box: o.box, text_box: o.text_box, rotation: Math.round(o.rotation ?? 0), source_text: o.source_text })),
+    objects: p.objects.map((o) => ({
+      id: o.id,
+      type: o.type,
+      box: o.box,
+      text_box: o.text_box,
+      rotation: Math.round(o.rotation ?? 0),
+      source_text: o.source_text,
+      ...(o.server_source !== undefined ? { source_text_base: o.server_source } : {}),
+      ...(forceSource?.has(o.id) ? { source_text_force: true } : {}),
+    })),
   };
 }
 

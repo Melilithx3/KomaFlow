@@ -3,7 +3,7 @@ import type { ProjectDTO } from '@komaflow/contract';
 import { ApiFailure } from '../core/api.js';
 import { ImportFiles } from '../core/commands.js';
 import { applicable, matchImport, type ImportPlan } from '../core/importMatch.js';
-import { downloadChapter, planPublish, publish, type PublishEvent } from '../core/publish.js';
+import { downloadChapter, planPublish, publish, type PublishEvent, type SourceConflictItem } from '../core/publish.js';
 import type { Store } from '../core/store.js';
 import { fileRef, saveWorkspace } from '../core/workspace.js';
 import type { AppCtx } from './App.js';
@@ -108,10 +108,11 @@ export function PublishDialog({ ctx, store, onClose }: { ctx: AppCtx; store: Sto
   const [projectId, setProjectId] = useState('');
   const [newTitle, setNewTitle] = useState('');
   const [number, setNumber] = useState(() => ws.title.match(/\d+(\.\d+)?/)?.[0] ?? '');
-  const [phase, setPhase] = useState<'link' | 'summary' | 'running' | 'conflict' | 'done'>(ws.server ? 'summary' : 'link');
+  const [phase, setPhase] = useState<'link' | 'summary' | 'running' | 'conflict' | 'sources' | 'done'>(ws.server ? 'summary' : 'link');
   const [log, setLog] = useState<string>('');
   const [conflict, setConflict] = useState<Array<{ id: string; markup_rev: number | null }>>([]);
   const [err, setErr] = useState<string | null>(null);
+  const [sources, setSources] = useState<SourceConflictItem[]>([]);
 
   useEffect(() => {
     if (phase === 'link') void ctx.api.projects().then((p) => (setProjects(p), setProjectId((c) => c || p[0]?.id || '')));
@@ -129,7 +130,7 @@ export function PublishDialog({ ctx, store, onClose }: { ctx: AppCtx; store: Sto
     }
   };
 
-  const run = async (overwrite?: Map<string, number | null>) => {
+  const run = async (overwrite?: Map<string, number | null>, forceSource?: ReadonlySet<string>) => {
     setPhase('running');
     setErr(null);
     const onEvent = (e: PublishEvent) =>
@@ -141,7 +142,7 @@ export function PublishDialog({ ctx, store, onClose }: { ctx: AppCtx; store: Sto
             : `Повтор загрузки (${e.attempt})…`,
       );
     try {
-      const r = await publish(ctx.host, ctx.api, store.get().ws, { onEvent, overwriteRevs: overwrite });
+      const r = await publish(ctx.host, ctx.api, store.get().ws, { onEvent, overwriteRevs: overwrite, forceSource });
       if (r.kind === 'conflict') {
         setConflict(r.pages);
         setPhase('conflict');
@@ -149,7 +150,13 @@ export function PublishDialog({ ctx, store, onClose }: { ctx: AppCtx; store: Sto
         if (r.kind === 'ok') {
           store.patch(() => r.ws);
           await saveWorkspace(ctx.host, r.ws);
-          setLog(`Опубликовано страниц: ${r.pages.filter((p) => p.changed).length}`);
+          const texts = r.pages.reduce((n, p) => n + p.source_updated.length, 0);
+          setLog(`Опубликовано страниц: ${r.pages.filter((p) => p.changed).length}${texts ? `, обновлено оригиналов: ${texts}` : ''}`);
+          if (r.sourceConflicts.length) {
+            setSources(r.sourceConflicts);
+            setPhase('sources');
+            return;
+          }
         } else setLog('Изменений нет — публиковать нечего.');
         setPhase('done');
       }
@@ -202,6 +209,56 @@ export function PublishDialog({ ctx, store, onClose }: { ctx: AppCtx; store: Sto
         </div>
       )}
       {phase === 'running' && <p role="status">{log}</p>}
+      {phase === 'sources' && (
+        <div>
+          <p className="ok">{log}</p>
+          <p>
+            Оригинальный текст этих объектов уже исправили в вебе после вашей последней публикации. Ваш вариант пока не отправлен:
+          </p>
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Стр. / №</th>
+                <th>В вебе</th>
+                <th>У вас</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sources.map((c) => (
+                <tr key={c.objectId}>
+                  <td>
+                    {c.pageIdx} / {c.order}
+                  </td>
+                  <td className="pre">{c.server}</td>
+                  <td className="pre">{c.desktop}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div className="row">
+            <button
+              onClick={async () => {
+                const byId = new Map(sources.map((c) => [c.objectId, c.server]));
+                store.patch((w) => ({
+                  ...w,
+                  pages: w.pages.map((p) => ({
+                    ...p,
+                    objects: p.objects.map((o) => (byId.has(o.id) ? { ...o, source_text: byId.get(o.id)!, server_source: byId.get(o.id)! } : o)),
+                  })),
+                }));
+                await saveWorkspace(ctx.host, store.get().ws);
+                setLog('Оставлены версии из веба.');
+                setPhase('done');
+              }}
+            >
+              Оставить версию из веба
+            </button>
+            <button className="danger" onClick={() => void run(undefined, new Set(sources.map((c) => c.objectId)))}>
+              Перезаписать мой вариант
+            </button>
+          </div>
+        </div>
+      )}
       {phase === 'conflict' && (
         <div>
           <p className="error">

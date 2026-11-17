@@ -162,7 +162,7 @@ describe('sync', () => {
     expect(rows.find((x) => x.id === victim)!.translation).toBe('Добро пожаловать!');
   });
 
-  it('never touches text; source_text of existing objects is ignored', async () => {
+  it('never touches translation/comment/flag; keeps a web-edited original and reports the conflict', async () => {
     const pid = pages[0]!.id;
     const oid = pages[0]!.objects[0]!.id;
     await web.req('PATCH', `/objects/${oid}`, { base_text_ver: 0, changes: { translation: 'перевод', comment: 'к', flagged: true, source_text: 'правка' } });
@@ -172,9 +172,41 @@ describe('sync', () => {
     p.objects.reverse();
     const r = await sync([p]);
     expect(r.json.pages[0].summary).toMatchObject({ moved: [oid], reordered: true });
+    expect(r.json.pages[0].source_conflicts).toEqual([{ id: oid, server_source_text: 'правка', desktop_source_text: 'OCR again' }]);
     const obj = (await web.req('GET', `/pages/${pid}`)).json.objects.find((x: { id: string }) => x.id === oid);
     expect(obj).toMatchObject({ translation: 'перевод', comment: 'к', flagged: true, source_text: 'правка', state: 'translated', order: 4 });
     expect(obj.geometry_ver).toBe(2);
+  });
+
+  it('desktop originals update existing objects the web did not touch; base and force rules', async () => {
+    const pid = pages[0]!.id;
+    const [a, b] = pages[0]!.objects;
+    // a: never edited in the web, no base → applied
+    const p = fixtureSyncPage(pages[0]!, 1);
+    p.objects[0]!.source_text = 'NEW OCR A';
+    const r = await sync([p]);
+    expect(r.json.pages[0]).toMatchObject({ changed: false, source_updated: [a!.id], source_conflicts: [] });
+    let objs = (await web.req('GET', `/pages/${pid}`)).json.objects;
+    const oa = objs.find((x: { id: string }) => x.id === a!.id);
+    expect(oa).toMatchObject({ source_text: 'NEW OCR A', text_ver: 1 });
+    // a again with the correct base → applied
+    const p2 = fixtureSyncPage(pages[0]!, 1);
+    p2.objects[0]!.source_text = 'NEWER A';
+    p2.objects[0]!.source_text_base = 'NEW OCR A';
+    expect((await sync([p2])).json.pages[0].source_updated).toEqual([a!.id]);
+    // b edited in the web; stale base → conflict; force → applied
+    await web.req('PATCH', `/objects/${b!.id}`, { base_text_ver: 0, changes: { source_text: 'web fix' } });
+    const p3 = fixtureSyncPage(pages[0]!, 1);
+    p3.objects[0]!.source_text = 'NEWER A'; // equal to the server: no-op
+    p3.objects[1]!.source_text = 'desktop B';
+    p3.objects[1]!.source_text_base = b!.source_text;
+    expect((await sync([p3])).json.pages[0].source_conflicts).toEqual([{ id: b!.id, server_source_text: 'web fix', desktop_source_text: 'desktop B' }]);
+    p3.objects[1]!.source_text_force = true;
+    expect((await sync([p3])).json.pages[0].source_updated).toEqual([b!.id]);
+    objs = (await web.req('GET', `/pages/${pid}`)).json.objects;
+    expect(objs.find((x: { id: string }) => x.id === b!.id).source_text).toBe('desktop B');
+    // markup untouched by text-only syncs
+    expect(await rev(pid)).toBe(1);
   });
 
   it('rotation is stored, bumps markup, is idempotent and validated', async () => {

@@ -2,6 +2,7 @@ import {
   ApiError,
   boxInsidePage,
   diffMarkup,
+  type SourceConflict,
   type SyncPage,
   type SyncRequest,
   type SyncResponse,
@@ -56,7 +57,11 @@ export function syncChapter(ctx: Ctx, chapterId: string, userId: string, req: Sy
 
     const at = iso(ctx.now());
     const out: SyncResponse['pages'] = [];
-    for (const p of req.pages) out.push(applyPage(ctx, chapterId, userId, p, existing.get(p.id), at));
+    for (const p of req.pages) {
+      const before = new Set(ctx.db.all<{ id: string }>('SELECT id FROM objects WHERE page_id = ?', p.id).map((r) => r.id));
+      const markup = applyPage(ctx, chapterId, userId, p, existing.get(p.id), at);
+      out.push({ ...markup, ...applySourceTexts(ctx, userId, p, before, at) });
+    }
     return { pages: out };
   });
 }
@@ -145,7 +150,7 @@ function applyPage(
   p: SyncPage,
   row: PageRow | undefined,
   at: string,
-): SyncResponse['pages'][number] {
+): Omit<SyncResponse['pages'][number], 'source_updated' | 'source_conflicts'> {
   // `undefined` keeps the server value, `null` removes the file (ADR 0005).
   const files = {
     clean_hash: p.clean_hash === undefined ? (row?.clean_hash ?? null) : p.clean_hash,
@@ -229,7 +234,7 @@ function applyPage(
         at,
       );
     } else if (geometry.has(o.id)) {
-      // source_text of existing objects is owned by the web and ignored here.
+      // source_text of existing objects goes through applySourceTexts (ADR 0013).
       ctx.db.run(
         `UPDATE objects SET type = ?, x = ?, y = ?, w = ?, h = ?, tx = ?, ty = ?, tw = ?, th = ?, ord = ?, rot = ?, deleted = 0,
                 geometry_ver = geometry_ver + 1 WHERE id = ?`,
@@ -260,4 +265,51 @@ function applyPage(
     JSON.stringify(diff.summary),
   );
   return { id: p.id, markup_rev: markupRev, changed: true, summary: diff.summary };
+}
+
+/**
+ * Originals of existing objects from the desktop (ADR 0013): taken when the server value still equals
+ * the desktop's base (or the web never edited it), or when forced; otherwise reported as a conflict.
+ * Written like a web edit (text_ver, field_vers, history) so web clients see it and keep their conflicts.
+ */
+function applySourceTexts(ctx: Ctx, userId: string, p: SyncPage, existedBefore: Set<string>, at: string) {
+  const updated: string[] = [];
+  const conflicts: SourceConflict[] = [];
+  for (const o of p.objects) {
+    if (o.source_text === undefined || !existedBefore.has(o.id)) continue;
+    const row = ctx.db.get<ObjectRow>('SELECT * FROM objects WHERE id = ?', o.id);
+    if (!row || row.source_text === o.source_text) continue;
+    const fv = JSON.parse(row.field_vers) as Record<string, number>;
+    const ok =
+      o.source_text_force === true ||
+      (o.source_text_base !== undefined && o.source_text_base !== null ? row.source_text === o.source_text_base : fv.source_text === undefined);
+    if (!ok) {
+      conflicts.push({ id: o.id, server_source_text: row.source_text, desktop_source_text: o.source_text });
+      continue;
+    }
+    const textVer = row.text_ver + 1;
+    fv.source_text = textVer;
+    ctx.db.run(
+      'UPDATE objects SET source_text = ?, text_ver = ?, field_vers = ?, updated_at = ?, updated_by = ? WHERE id = ?',
+      o.source_text,
+      textVer,
+      JSON.stringify(fv),
+      at,
+      userId,
+      o.id,
+    );
+    ctx.db.run(
+      'INSERT INTO text_history (object_id, field, old_value, new_value, user_id, at, text_ver) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      o.id,
+      'source_text',
+      row.source_text,
+      o.source_text,
+      userId,
+      at,
+      textVer,
+    );
+    updated.push(o.id);
+  }
+  if (updated.length) ctx.db.run('UPDATE pages SET rev = rev + 1 WHERE id = ?', p.id);
+  return { source_updated: updated, source_conflicts: conflicts };
 }
