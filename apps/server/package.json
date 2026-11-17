@@ -1,0 +1,32 @@
+{
+  "name": "@komaflow/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "komaflow-admin": "dist/admin.js"
+  },
+  "scripts": {
+    "dev": "tsx watch --env-file-if-exists=.env src/main.ts",
+    "build": "node build.mjs",
+    "start": "node dist/server.js",
+    "admin": "tsx src/admin.ts",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@fastify/cookie": "^11.1.5",
+    "@fastify/static": "^10.1.11",
+    "@komaflow/contract": "workspace:*",
+    "@komaflow/psd": "workspace:*",
+    "fastify": "^5.12.8",
+    "fflate": "^0.8.3",
+    "sharp": "^0.34.5",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "ag-psd": "^34.2.1",
+    "esbuild": "^0.28.2",
+    "tsx": "^4.23.15"
+  }
+}

@@ -128,3 +128,4 @@ export function fixtureSyncPage(p: FixturePage, base_markup_rev: number | null =
     objects: p.objects.map((o) => ({ id: o.id, type: o.type, box: o.box, text_box: o.text_box, source_text: o.source_text })),
   };
 }
+export { seedFixtureChapter, type SeedHttp, type SeedOptions, type SeedResult } from './seed.js';

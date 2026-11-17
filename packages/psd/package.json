@@ -1,0 +1,28 @@
+{
+  "name": "@komaflow/psd",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./sharp": "./src/node/sharp-codec.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@komaflow/contract": "workspace:*",
+    "ag-psd": "^34.2.1"
+  },
+  "devDependencies": {
+    "sharp": "^0.34.5"
+  },
+  "peerDependencies": {
+    "sharp": "^0.34"
+  },
+  "peerDependenciesMeta": {
+    "sharp": {
+      "optional": true
+    }
+  }
+}
