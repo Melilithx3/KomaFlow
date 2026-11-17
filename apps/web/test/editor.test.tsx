@@ -124,7 +124,7 @@ describe('ConflictDialog', () => {
 });
 
 describe('ExportPanel', () => {
-  it('Text checkbox is off and disabled; raw/clean/notes are on', () => {
+  it('all four layers are on by default, Text included; nothing selected disables download', () => {
     const qc = new QueryClient();
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ latest_export_id: null, finished_at: null, pages: [] }))));
     render(
@@ -132,13 +132,12 @@ describe('ExportPanel', () => {
         <ExportPanel chapterId="019b76da-a800-7000-8000-0000000003e8" />
       </QueryClientProvider>,
     );
-    const text = screen.getByLabelText('Текст') as HTMLInputElement;
-    expect(text.disabled).toBe(true);
-    expect(text.checked).toBe(false);
-    for (const l of ['Raw', 'Clean', 'Notes']) expect((screen.getByLabelText(l) as HTMLInputElement).checked).toBe(true);
-    fireEvent.click(screen.getByLabelText('Raw'));
-    fireEvent.click(screen.getByLabelText('Clean'));
-    fireEvent.click(screen.getByLabelText('Notes'));
+    for (const l of ['Raw', 'Clean', 'Notes', 'Текст']) {
+      const cb = screen.getByLabelText(l) as HTMLInputElement;
+      expect(cb.checked).toBe(true);
+      expect(cb.disabled).toBe(false);
+      fireEvent.click(cb);
+    }
     expect((screen.getByText('Скачать') as HTMLButtonElement).disabled).toBe(true);
     vi.unstubAllGlobals();
   });

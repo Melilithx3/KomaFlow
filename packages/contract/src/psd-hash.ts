@@ -9,6 +9,8 @@ export interface PsdHashObject {
   type: ObjectType;
   box: Box;
   text_box: Box | null;
+  /** Degrees; part of the hash only with text layers (ADR 0011). */
+  rotation?: number;
   order: number;
   translation: string;
   state: TranslationState;
@@ -50,6 +52,7 @@ function effective(input: PsdHashInput) {
           type: o.type,
           box: boxValue(o.box),
           text_box: boxValue(o.text_box),
+          rotation: o.rotation ?? 0,
           order: o.order,
           translation: o.translation,
           state: o.state,
@@ -79,7 +82,7 @@ export function psdHashParts(input: PsdHashInput): PsdHashParts {
       raw_hash: e.raw_hash,
       width: e.width,
       height: e.height,
-      objects: e.objects.map((o) => ({ id: o.id, type: o.type, box: o.box, text_box: o.text_box, order: o.order })),
+      objects: e.objects.map((o) => ({ id: o.id, type: o.type, box: o.box, text_box: o.text_box, rotation: o.rotation, order: o.order })),
     }),
     translation: h(e.objects.map((o) => ({ id: o.id, translation: o.translation, state: o.state }))),
     settings: h({ layers: e.layers, psd_settings: e.psd_settings }),

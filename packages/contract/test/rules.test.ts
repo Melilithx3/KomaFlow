@@ -144,7 +144,7 @@ describe('psdInputHash', () => {
     width: 800,
     height: 1200,
     psd_settings: DEFAULT_PSD_SETTINGS,
-    layers: DEFAULT_EXPORT_LAYERS,
+    layers: { ...DEFAULT_EXPORT_LAYERS, text: false },
     objects: [
       {
         id: 'o1',
@@ -158,7 +158,7 @@ describe('psdInputHash', () => {
     ],
   };
   const withTranslation = (t: string) => ({ ...input, objects: [{ ...input.objects[0]!, translation: t }] });
-  it('MVP: translation, markup and font settings do not affect the hash', () => {
+  it('without text layers: translation, markup and font settings do not affect the hash', () => {
     const h = psdInputHash(input);
     expect(h).toMatch(/^[0-9a-f]{64}$/);
     expect(psdInputHash(structuredClone(input))).toBe(h);
@@ -177,9 +177,13 @@ describe('psdInputHash', () => {
     const noClean = { ...input, layers: { ...input.layers, clean: false } };
     expect(psdInputHash({ ...noClean, clean_hash: 'c'.repeat(64) })).toBe(psdInputHash(noClean));
   });
-  it('with text layers (post-MVP) translation counts', () => {
+  it('with text layers translation, rotation and font settings count', () => {
     const t = { ...input, layers: { ...input.layers, text: true } };
     expect(psdInputHash({ ...t, objects: withTranslation('Нет').objects })).not.toBe(psdInputHash(t));
+    expect(psdInputHash({ ...t, objects: [{ ...t.objects[0]!, rotation: 5 }] })).not.toBe(psdInputHash(t));
+    expect(psdInputHash({ ...t, psd_settings: { ...DEFAULT_PSD_SETTINGS, default_font: 'X' } })).not.toBe(psdInputHash(t));
+    expect(staleReasons(psdHashParts(t), psdHashParts({ ...t, objects: withTranslation('Нет').objects }))).toEqual(['translation']);
+    expect(DEFAULT_EXPORT_LAYERS.text).toBe(true);
   });
   it('explains staleness by parts', () => {
     const before = psdHashParts(input);

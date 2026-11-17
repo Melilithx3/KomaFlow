@@ -15,7 +15,7 @@ interface Props {
 export function ExportPanel({ chapterId, pageId, pageIdx }: Props) {
   const qc = useQueryClient();
   const [onlyReady, setOnlyReady] = useState(!pageId);
-  const [layers, setLayers] = useState({ raw: true, clean: true, notes: true });
+  const [layers, setLayers] = useState({ raw: true, clean: true, notes: true, text: true });
   const [job, setJob] = useState<ExportDTO | null>(null);
   const [error, setError] = useState<string | null>(null);
   const downloaded = useRef<string | null>(null);
@@ -46,7 +46,7 @@ export function ExportPanel({ chapterId, pageId, pageIdx }: Props) {
     if (current && current.status !== job?.status && (current.status === 'failed' || current.status === 'expired')) setJob(current);
   }, [current, job?.status]);
 
-  const anyLayer = layers.raw || layers.clean || layers.notes;
+  const anyLayer = layers.raw || layers.clean || layers.notes || layers.text;
   const busy = current?.status === 'queued' || current?.status === 'running';
 
   const start = async () => {
@@ -55,7 +55,7 @@ export function ExportPanel({ chapterId, pageId, pageIdx }: Props) {
       const r = await api<{ export: ExportDTO }>('POST', `/chapters/${chapterId}/exports`, {
         only_ready: onlyReady,
         ...(pageId ? { page_ids: [pageId] } : {}),
-        layers: { ...layers, text: false },
+        layers,
       });
       downloaded.current = null;
       setJob(r.export);
@@ -82,17 +82,15 @@ export function ExportPanel({ chapterId, pageId, pageIdx }: Props) {
               <input type="checkbox" checked={layers[k]} onChange={(e) => setLayers({ ...layers, [k]: e.target.checked })} /> {k[0]!.toUpperCase() + k.slice(1)}
             </label>
           ))}
-          <label className="check disabled" title={t.export.textHint}>
-            <input type="checkbox" checked={false} disabled aria-describedby="text-hint" /> {t.export.text}
+          <label className="check" title={t.export.textHint}>
+            <input type="checkbox" checked={layers.text} onChange={(e) => setLayers({ ...layers, text: e.target.checked })} /> {t.export.text}
           </label>
         </fieldset>
         <button className="primary" onClick={() => void start()} disabled={!anyLayer || busy}>
           {pageId ? t.page.downloadPage : t.export.download}
         </button>
       </div>
-      <p id="text-hint" className="hint">
-        {t.export.textHint}
-      </p>
+      <p className="hint">{t.export.textHint}</p>
       {current && (
         <p className="export-progress" role="status">
           {current.status === 'queued' && t.export.queued}

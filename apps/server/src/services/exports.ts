@@ -77,9 +77,19 @@ function selection(ctx: Ctx, chapterId: string, userId: string, params: ExportPa
   const rows = new Map(
     ctx.db.all<PageRow>('SELECT * FROM pages WHERE chapter_id = ?', chapterId).map((p) => [p.id, p]),
   );
+  const textCounts = new Map(
+    ctx.db
+      .all<{ page_id: string; n: number }>(
+        `SELECT o.page_id, COUNT(*) AS n FROM objects o JOIN pages p ON p.id = o.page_id
+          WHERE p.chapter_id = ? AND o.deleted = 0 AND o.state = 'translated' AND TRIM(o.translation) <> ''
+          GROUP BY o.page_id`,
+        chapterId,
+      )
+      .map((r) => [r.page_id, r.n]),
+  );
   const pages = summaries.map((s) => {
     const r = rows.get(s.id)!;
-    return { ...r, ready_for_typing: s.ready_for_typing };
+    return { ...r, ready_for_typing: s.ready_for_typing, text_objects: textCounts.get(s.id) ?? 0 };
   });
   return selectPages(pages, params);
 }
@@ -170,6 +180,7 @@ function hashInput(ctx: Ctx, page: PageRow, layers: ExportLayers, settings: PsdS
       type: o.type,
       box: objBox(o),
       text_box: objTextBox(o),
+      rotation: o.rot,
       order: o.ord,
       translation: o.translation,
       state: o.state,
@@ -298,6 +309,7 @@ export class ExportWorker {
               notes: await read(page.notes_hash, params.layers.notes),
               layers: params.layers,
               settings,
+              objects: params.layers.text ? textObjects(ctx, page.id) : [],
             },
             this.codec,
           );
@@ -438,4 +450,18 @@ export function expireExports(ctx: Ctx): number {
     ctx.db.run("UPDATE exports SET status = 'expired', file_path = NULL WHERE id = ?", r.id);
   }
   return rows.length;
+}
+
+/** Objects for text layers: non-deleted, in reading order (docs/04-psd.md §3). */
+function textObjects(ctx: Ctx, pageId: string) {
+  return ctx.db.all<ObjectRow>('SELECT * FROM objects WHERE page_id = ? AND deleted = 0 ORDER BY ord', pageId).map((o) => ({
+    id: o.id,
+    order: o.ord,
+    type: o.type,
+    box: objBox(o),
+    textBox: objTextBox(o),
+    rotation: o.rot,
+    translation: o.translation,
+    state: o.state,
+  }));
 }

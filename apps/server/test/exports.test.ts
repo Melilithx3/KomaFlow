@@ -44,7 +44,7 @@ describe('exports', () => {
   it('default: only ready pages, zip with PSD + manifest, layer order', async () => {
     const r = await runExport();
     expect(r.json.export).toMatchObject({ status: 'done', progress: { done: 1, total: 1 }, errors: [] });
-    expect(r.json.export.params).toEqual({ only_ready: true, page_ids: null, layers: { raw: true, clean: true, notes: true, text: false } });
+    expect(r.json.export.params).toEqual({ only_ready: true, page_ids: null, layers: { raw: true, clean: true, notes: true, text: true } });
     const m = r.json.manifest;
     expect(m.pages.map((p: { idx: number; file: string }) => [p.idx, p.file])).toEqual([[1, '001.psd']]);
     expect(m.skipped_pages.map((s: { idx: number; reason: string }) => [s.idx, s.reason])).toEqual([
@@ -65,14 +65,19 @@ describe('exports', () => {
     expect(names).toEqual([
       ['Notes', false],
       ['Raw', true],
+      ['Text', false],
       ['Clean', false],
     ]);
+    const texts = [...[...psd.children!].reverse()[2]!.children!].reverse();
+    expect(texts.map((l) => l.name)).toEqual(['01_bubble', '02_bubble', '03_sfx', '04_text']);
+    expect(texts[1]!.text!.text).toBe('Добро пожаловать!');
   });
 
-  it('layer flags: text → 422, none → 422, only notes skips pages without notes', async () => {
-    expect((await web.req('POST', `/chapters/${chapterId}/exports`, { layers: { text: true } })).status).toBe(422);
-    expect((await web.req('POST', `/chapters/${chapterId}/exports`, { layers: { raw: false, clean: false, notes: false } })).status).toBe(422);
-    const r = await runExport({ only_ready: false, layers: { raw: false, clean: false, notes: true } });
+  it('layer flags: none → 422, text only works, only notes skips pages without notes', async () => {
+    expect((await web.req('POST', `/chapters/${chapterId}/exports`, { layers: { raw: false, clean: false, notes: false, text: false } })).status).toBe(422);
+    const tx = await runExport({ only_ready: false, layers: { raw: false, clean: false, notes: false, text: true } });
+    expect(tx.json.manifest.pages.map((p: { idx: number }) => p.idx)).toEqual([1]); // only page 1 is translated
+    const r = await runExport({ only_ready: false, layers: { raw: false, clean: false, notes: true, text: false } });
     expect(r.json.manifest.pages.map((p: { idx: number }) => p.idx)).toEqual([1]);
     expect(r.json.manifest.skipped_pages.map((s: { reason: string }) => s.reason)).toEqual(['no_layers', 'no_layers']);
   });
@@ -93,7 +98,7 @@ describe('exports', () => {
     expect(none.json.error.code).toBe('EXPORT_NOT_READY');
   });
 
-  it('freshness: translation edits keep it fresh; clean/notes/settings make it stale', async () => {
+  it('freshness: with text layers a translation edit makes it stale; clean/notes/settings too', async () => {
     expect((await status()).latest_export_id).toBeNull();
     await runExport();
     let s = await status();
@@ -101,9 +106,13 @@ describe('exports', () => {
 
     const o = (await web.req('GET', `/pages/${pages[0]!.id}`)).json.objects[0];
     await web.req('PATCH', `/objects/${o.id}`, { base_text_ver: o.text_ver, changes: { translation: 'Новый перевод' } });
+    expect((await status()).pages[0]).toMatchObject({ state: 'stale', stale_reasons: ['translation'] });
+    await runExport();
     const moved = fixtureSyncPage(pages[0]!, 1);
     moved.objects[0]!.box = { x: 10, y: 10, w: 50, h: 50 };
     await desk.req('POST', `/chapters/${chapterId}/sync`, { pages: [moved] });
+    expect((await status()).pages[0]).toMatchObject({ state: 'stale', stale_reasons: ['markup'] });
+    await runExport();
     expect((await status()).pages[0].state).toBe('fresh');
 
     const clean2 = encodePng(800, 1200, new Uint8Array(800 * 1200 * 4).fill(250));

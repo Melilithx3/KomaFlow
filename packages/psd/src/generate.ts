@@ -1,5 +1,6 @@
 import { writePsdUint8Array, type Layer, type Psd } from 'ag-psd';
 import { planLayers, type LayerPlan } from './layers.js';
+import { buildTextLayer, wantsTextLayer } from './text.js';
 import { PSD_MAX_SIDE, PsdError, type DecodedImage, type ImageCodec, type PsdPageInput } from './types.js';
 
 /** PSD file size limit (2 GB). */
@@ -7,7 +8,8 @@ const PSD_MAX_BYTES = 2 * 1024 ** 3 - 1;
 
 /**
  * Builds a raster PSD (RGB, 8 bit) for one page (docs/04-psd.md §1–2).
- * Layers top to bottom: Notes, Raw (hidden unless `raw_layer_visible`), Clean. No text layers in MVP.
+ * Layers top to bottom: Notes, Raw (hidden unless `raw_layer_visible`), group Text (editable box text,
+ * docs/04-psd.md §3), Clean. Text pixels are not pre-rendered: Photoshop redraws them on open.
  * Pure: no Node APIs; the codec is injected.
  */
 export async function generatePsd(input: PsdPageInput, codec: ImageCodec): Promise<Uint8Array> {
@@ -15,13 +17,13 @@ export async function generatePsd(input: PsdPageInput, codec: ImageCodec): Promi
   if (width > PSD_MAX_SIDE || height > PSD_MAX_SIDE) {
     throw new PsdError('PSD_TOO_LARGE', `page ${width}x${height} exceeds PSD limit of ${PSD_MAX_SIDE}px`);
   }
-  if (input.layers.text) throw new PsdError('GENERATION_FAILED', 'text layers are not supported in MVP');
   const plan = planLayers(
     input.layers,
     { raw: !!input.raw, clean: !!input.clean, notes: !!input.notes },
     input.settings,
   );
-  if (plan.length === 0) throw new PsdError('GENERATION_FAILED', 'no layers to write');
+  const textObjects = input.layers.text ? (input.objects ?? []).filter(wantsTextLayer).sort((a, b) => a.order - b.order) : [];
+  if (plan.length === 0 && textObjects.length === 0) throw new PsdError('GENERATION_FAILED', 'no layers to write');
 
   const bytesFor: Record<LayerPlan['name'], Uint8Array | undefined> = {
     Notes: input.notes,
@@ -33,7 +35,17 @@ export async function generatePsd(input: PsdPageInput, codec: ImageCodec): Promi
   const bottomUp = [...plan].reverse();
   const composite = new Uint8Array(width * height * 4);
   const children: Layer[] = [];
+  const textGroup: Layer | null = textObjects.length
+    ? {
+        name: 'Text',
+        opened: true,
+        // bottom-up inside the group: the first object ends on top
+        children: [...textObjects].reverse().map((o) => buildTextLayer(o, input.settings, input.page)),
+      }
+    : null;
   for (const l of bottomUp) {
+    // the Text group sits right above Clean (or at the bottom when there is no Clean)
+    if (textGroup && l.name !== 'Clean' && !children.includes(textGroup)) children.push(textGroup);
     const img = await decode(codec, bytesFor[l.name]!, l.name);
     if (img.width !== width || img.height !== height) {
       throw new PsdError(
@@ -55,6 +67,7 @@ export async function generatePsd(input: PsdPageInput, codec: ImageCodec): Promi
     });
   }
 
+  if (textGroup && !children.includes(textGroup)) children.push(textGroup);
   const psd: Psd = {
     width,
     height,
@@ -63,10 +76,20 @@ export async function generatePsd(input: PsdPageInput, codec: ImageCodec): Promi
     colorMode: 3, // RGB
     children,
     imageData: { width, height, data: toClamped(composite) },
+    imageResources: {
+      resolutionInfo: {
+        horizontalResolution: input.settings.dpi,
+        horizontalResolutionUnit: 'PPI',
+        widthUnit: 'Inches',
+        verticalResolution: input.settings.dpi,
+        verticalResolutionUnit: 'PPI',
+        heightUnit: 'Inches',
+      },
+    },
   };
   let out: Uint8Array;
   try {
-    out = writePsdUint8Array(psd, { noBackground: true, generateThumbnail: false });
+    out = writePsdUint8Array(psd, { noBackground: true, generateThumbnail: false, invalidateTextLayers: textObjects.length > 0 });
   } catch (e) {
     throw new PsdError('GENERATION_FAILED', e instanceof Error ? e.message : String(e));
   }

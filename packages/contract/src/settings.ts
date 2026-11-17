@@ -47,5 +47,5 @@ export const ExportLayers = z.strictObject({
 });
 export type ExportLayers = z.infer<typeof ExportLayers>;
 
-/** MVP: text layers are not supported (docs/04-psd.md), `text` is always false. */
-export const DEFAULT_EXPORT_LAYERS: ExportLayers = { raw: true, clean: true, notes: true, text: false };
+/** Editable text layers are on by default since leaving MVP (ADR 0014). */
+export const DEFAULT_EXPORT_LAYERS: ExportLayers = { raw: true, clean: true, notes: true, text: true };

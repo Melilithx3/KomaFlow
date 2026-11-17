@@ -109,6 +109,7 @@ function ProjectSettings() {
     }
   };
   const psd = form.settings.psd;
+  const setPsd = (patch: Partial<typeof psd>) => setForm({ ...form, settings: { psd: { ...psd, ...patch } } });
   return (
     <form className="card form-grid" onSubmit={(e) => void save(e)}>
       <h2>{t.settings.project}</h2>
@@ -159,6 +160,78 @@ function ProjectSettings() {
           onChange={(e) => setForm({ ...form, settings: { psd: { ...psd, notes_opacity: Math.round(Number(e.target.value)) } } })}
         />
       </label>
+      <h3>{t.settings.text}</h3>
+      <label>
+        {t.settings.font}
+        <input value={psd.default_font} onChange={(e) => setPsd({ default_font: e.target.value.trim() })} required maxLength={200} spellCheck={false} />
+      </label>
+      <div className="form-row">
+        <label>
+          {t.settings.dpi}
+          <input type="number" min={1} max={2400} value={psd.dpi} onChange={(e) => setPsd({ dpi: Math.max(1, Math.round(Number(e.target.value))) })} />
+        </label>
+        <label>
+          {t.settings.color}
+          <input type="color" value={psd.text_color} onChange={(e) => setPsd({ text_color: e.target.value })} />
+        </label>
+        <label>
+          {t.settings.justification}
+          <select value={psd.justification} onChange={(e) => setPsd({ justification: e.target.value as typeof psd.justification })}>
+            {(['left', 'center', 'right'] as const).map((j) => (
+              <option key={j} value={j}>
+                {t.settings.justify[j]}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+      <div className="form-row">
+        <label>
+          {t.settings.minSize}
+          <input type="number" min={1} max={1000} value={psd.min_font_size} onChange={(e) => setPsd({ min_font_size: Math.max(1, Math.round(Number(e.target.value))) })} />
+        </label>
+        <label>
+          {t.settings.lineHeight}
+          <input type="number" min={0.5} max={5} step={0.05} value={psd.line_height} onChange={(e) => setPsd({ line_height: Number(e.target.value) })} />
+        </label>
+      </div>
+      <table className="settings-table">
+        <thead>
+          <tr>
+            <th />
+            <th>{t.settings.baseSize}</th>
+            <th>{t.settings.padding}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {(['bubble', 'sfx', 'onomatopoeia', 'text'] as const).map((k) => (
+            <tr key={k}>
+              <td>{t.settings.typeNames[k]}</td>
+              <td>
+                <input
+                  type="number"
+                  min={1}
+                  max={1000}
+                  value={psd.base_font_size[k]}
+                  onChange={(e) => setPsd({ base_font_size: { ...psd.base_font_size, [k]: Math.max(1, Math.round(Number(e.target.value))) } })}
+                  aria-label={`${t.settings.baseSize}: ${t.settings.typeNames[k]}`}
+                />
+              </td>
+              <td>
+                <input
+                  type="number"
+                  min={0}
+                  max={0.45}
+                  step={0.01}
+                  value={psd.text_padding[k]}
+                  onChange={(e) => setPsd({ text_padding: { ...psd.text_padding, [k]: Math.min(0.45, Math.max(0, Number(e.target.value))) } })}
+                  aria-label={`${t.settings.padding}: ${t.settings.typeNames[k]}`}
+                />
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
       {msg && <p className="ok">{msg}</p>}
       <button className="primary">{t.save}</button>
     </form>

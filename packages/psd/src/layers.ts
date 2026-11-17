@@ -17,7 +17,7 @@ export interface AvailableFiles {
 
 /**
  * Which raster layers go into the PSD, top to bottom (docs/04-psd.md §2): Notes, Raw (hidden by
- * default), Clean. Text layers are not part of MVP and are never planned here.
+ * default), [group Text], Clean. The Text group is added by the generator between Raw and Clean.
  */
 export function planLayers(
   layers: ExportLayers,
@@ -33,7 +33,6 @@ export function planLayers(
 
 /** Validates the layer flags of an export request (docs/04-psd.md §2). Returns an error message or null. */
 export function validateExportLayers(l: ExportLayers): string | null {
-  if (l.text) return 'Текстовые слои пока не поддерживаются (text layers are not supported yet)';
-  if (!l.raw && !l.clean && !l.notes) return 'at least one of raw, clean, notes must be selected';
+  if (!l.raw && !l.clean && !l.notes && !l.text) return 'at least one layer must be selected';
   return null;
 }

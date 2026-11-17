@@ -8,6 +8,8 @@ export interface SelectablePage {
   clean_hash: string | null;
   notes_hash: string | null;
   ready_for_typing: boolean;
+  /** Objects that would get a text layer (translated, non-empty). */
+  text_objects?: number;
 }
 
 export interface Selection<P> {
@@ -32,8 +34,12 @@ export function selectPages<P extends SelectablePage>(
       out.skipped.push({ page: p, reason: 'no_clean' });
       continue;
     }
-    const any = params.layers.raw || (params.layers.notes && p.notes_hash !== null);
-    if (!any && !(params.layers.clean && p.clean_hash)) {
+    const any =
+      params.layers.raw ||
+      (params.layers.notes && p.notes_hash !== null) ||
+      (params.layers.clean && p.clean_hash !== null) ||
+      (params.layers.text && (p.text_objects ?? 0) > 0);
+    if (!any) {
       out.skipped.push({ page: p, reason: 'no_layers' });
       continue;
     }

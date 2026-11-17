@@ -1,4 +1,5 @@
 import type { ExportLayers, PsdSettings } from '@komaflow/contract';
+import type { TextObject } from './text.js';
 
 export const GENERATOR = { name: 'komaflow-psd', version: '0.1.0' } as const;
 
@@ -27,7 +28,9 @@ export interface PsdPageInput {
   clean?: Uint8Array | undefined;
   notes?: Uint8Array | undefined;
   layers: ExportLayers;
-  settings: Pick<PsdSettings, 'raw_layer_visible' | 'notes_opacity'>;
+  settings: PsdSettings;
+  /** Objects for text layers (used only when `layers.text`). */
+  objects?: TextObject[];
 }
 
 export type PsdErrorCode = 'PSD_TOO_LARGE' | 'DECODE_FAILED' | 'GENERATION_FAILED';

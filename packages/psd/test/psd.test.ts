@@ -9,11 +9,11 @@ initializeCanvas(
   (width, height) => ({ width, height, data: new Uint8ClampedArray(width * height * 4), colorSpace: 'srgb' }) as never,
 );
 import { encodePng, makeFixtureChapter, Raster } from '@komaflow/contract/fixtures';
-import type { ExportLayers } from '@komaflow/contract';
-import { generatePsd, planLayers, selectPages, validateExportLayers, compositeOver, PsdError, psdFileName } from '../src/index.js';
+import { DEFAULT_PSD_SETTINGS, type ExportLayers } from '@komaflow/contract';
+import { buildTextLayer, countLines, fitFontSize, generatePsd, planLayers, selectPages, validateExportLayers, compositeOver, PsdError, psdFileName } from '../src/index.js';
 import { sharpCodec } from '../src/node/sharp-codec.js';
 
-const S = { raw_layer_visible: false, notes_opacity: 100 };
+const S = { ...DEFAULT_PSD_SETTINGS, raw_layer_visible: false, notes_opacity: 100 };
 const L = (raw: boolean, clean: boolean, notes: boolean): ExportLayers => ({ raw, clean, notes, text: false });
 
 function read(bytes: Uint8Array) {
@@ -33,8 +33,9 @@ describe('planLayers / validation', () => {
     expect(planLayers(L(true, true, true), { raw: true, clean: false, notes: false }, S).map((l) => l.name)).toEqual(['Raw']);
     expect(planLayers(L(false, false, true), { raw: true, clean: true, notes: false }, S)).toEqual([]);
   });
-  it('rejects text and empty layer sets', () => {
-    expect(validateExportLayers({ raw: true, clean: true, notes: true, text: true })).toMatch(/Текстовые/);
+  it('accepts text, rejects an empty layer set', () => {
+    expect(validateExportLayers({ raw: true, clean: true, notes: true, text: true })).toBeNull();
+    expect(validateExportLayers({ raw: false, clean: false, notes: false, text: true })).toBeNull();
     expect(validateExportLayers(L(false, false, false))).not.toBeNull();
     expect(validateExportLayers(L(false, true, false))).toBeNull();
   });
@@ -164,5 +165,63 @@ describe('compositeOver', () => {
     expect(d[0]).toBeGreaterThan(120);
     expect(d[2]).toBeGreaterThan(120);
     expect(d[3]).toBe(255);
+  });
+});
+
+
+describe('text layers', () => {
+  const [p1] = makeFixtureChapter();
+  const objs = p1!.objects.map((o, i) => ({
+    id: o.id,
+    order: i + 1,
+    type: o.type,
+    box: o.box,
+    rotation: i === 2 ? -10 : 0,
+    translation: i === 3 ? '' : o.translation,
+    state: (i === 3 ? 'empty' : 'translated') as 'empty' | 'translated',
+  }));
+
+  it('Notes / Raw / Text group / Clean; editable box text, names, font, rotation', async () => {
+    const out = await generatePsd(
+      { page: { index: 1, width: 800, height: 1200 }, raw: p1!.raw, clean: p1!.clean!, notes: p1!.notes!, layers: { raw: true, clean: true, notes: true, text: true }, settings: S, objects: objs },
+      sharpCodec,
+    );
+    const psd = read(out);
+    const top = topDown(psd);
+    expect(top.map((l) => l.name)).toEqual(['Notes', 'Raw', 'Text', 'Clean']);
+    const group = top[2]!;
+    const texts = [...group.children!].reverse();
+    expect(texts.map((l) => l.name)).toEqual(['01_bubble', '02_bubble', '03_sfx']); // empty one has no layer
+    const t1 = texts[0]!.text!;
+    expect(t1.text).toBe('Так это и есть тот самый магазин…');
+    expect(t1.shapeType).toBe('box');
+    expect(t1.style?.font?.name).toBe('ArialMT');
+    expect(t1.paragraphStyle?.justification).toBe('center');
+    // text rect = box shrunk by 10 % padding for bubbles
+    expect(t1.boxBounds).toEqual([0, 0, 176, 208]);
+    expect(t1.transform!.slice(4)).toEqual([542, 86]);
+    // rotated sfx: transform carries the rotation
+    const t3 = texts[2]!.text!;
+    expect(t3.transform![0]).toBeCloseTo(Math.cos((-10 * Math.PI) / 180), 5);
+    expect(t3.transform![1]).toBeCloseTo(Math.sin((-10 * Math.PI) / 180), 5);
+  });
+
+  it('text-only export works without any raster layer', async () => {
+    const out = await generatePsd({ page: { index: 1, width: 800, height: 1200 }, layers: { raw: false, clean: false, notes: false, text: true }, settings: S, objects: objs }, sharpCodec);
+    expect(topDown(read(out)).map((l) => l.name)).toEqual(['Text']);
+  });
+
+  it('font size shrinks to fit, not below the minimum', () => {
+    expect(countLines('один два три', 1000, 20)).toBe(1);
+    expect(countLines('один два три', 60, 20)).toBe(3);
+    const rect = { x: 0, y: 0, w: 100, h: 40 };
+    const small = fitFontSize('Очень длинная реплика, которая точно не влезет в маленький пузырь', rect, 28, 10, 1.15);
+    expect(small).toBeLessThan(28);
+    expect(small).toBeGreaterThanOrEqual(10);
+    expect(fitFontSize('Да', rect, 28, 10, 1.15)).toBe(28);
+    const l = buildTextLayer({ id: 'x', order: 7, type: 'text', box: { x: 0, y: 0, w: 100, h: 100 }, translation: ' а \n б ', state: 'translated' }, { ...S, dpi: 144 }, { width: 100, height: 100 });
+    expect(l.name).toBe('07_text');
+    expect(l.text!.text).toBe('а\nб');
+    expect(l.text!.style!.fontSize).toBe(12); // 24 px at 144 dpi = 12 pt
   });
 });
