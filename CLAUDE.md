@@ -54,4 +54,16 @@
 
 ## Команды
 
-Заполни этот раздел по мере создания скриптов (`pnpm dev:server`, `pnpm dev:web`, `pnpm test`, `pnpm build`, запуск десктопа и сайдкара) и держи его актуальным.
+| Команда | Что делает |
+|---|---|
+| `pnpm install` | зависимости (Node ≥ 24.7, pnpm 10) |
+| `pnpm test` / `pnpm lint` / `pnpm typecheck` | все проверки (vitest projects) |
+| `pnpm build` | сервер (`apps/server/dist`) и веб (`apps/web/dist`) |
+| `pnpm dev:server` | API на :8787, читает `apps/server/.env` (пример: `.env.example`, `KOMAFLOW_DEV=1`) |
+| `pnpm dev:web` | Vite на :5173, проксирует `/api` на :8787 |
+| `pnpm --filter @komaflow/server admin -- <cmd>` | `komaflow-admin` из исходников (в проде: `node apps/server/dist/admin.js`) |
+| `KOMAFLOW_DEV=1 pnpm --filter @komaflow/server admin -- seed --fixtures` | демо-пользователь `demo` / `demo-password` + фикстурная глава |
+| `pnpm seed -- --url http://127.0.0.1:8787 --login demo --password demo-password` | сид через HTTP API (как десктоп) |
+| `pnpm --filter @komaflow/tools s1` | харнес спайка S1 (PSD в `tools/spikes/s1-psd/out/`) |
+| `bash tools/spikes/s3-arm/run.sh` | харнес спайка S3 (на Orange Pi) |
+| `node apps/server/dist/server.js` | прод-сервер (после `pnpm build`), отдаёт и API, и веб |

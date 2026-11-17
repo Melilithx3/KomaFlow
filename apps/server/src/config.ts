@@ -8,6 +8,7 @@ export interface Config {
   tmpDir: string;
   exportDir: string;
   backupDir: string;
+  /** Built web app; served when it contains index.html. Default: apps/web/dist. */
   webDir: string | null;
   migrationsDir: string;
   host: string;
@@ -45,7 +46,7 @@ export function loadConfig(env: Env = process.env, overrides: Partial<Config> = 
     tmpDir: resolve(env.KOMAFLOW_TMP_DIR ?? join(dataDir, 'tmp')),
     exportDir: resolve(env.KOMAFLOW_EXPORT_DIR ?? join(dataDir, 'exports')),
     backupDir: join(dataDir, 'backups'),
-    webDir: env.KOMAFLOW_WEB_DIR ? resolve(env.KOMAFLOW_WEB_DIR) : null,
+    webDir: resolve(env.KOMAFLOW_WEB_DIR ?? fileURLToPath(new URL('../../web/dist', import.meta.url))),
     migrationsDir: resolve(env.KOMAFLOW_MIGRATIONS_DIR ?? defaultMigrationsDir()),
     host: env.KOMAFLOW_HOST ?? '127.0.0.1',
     port: int(env.KOMAFLOW_PORT, 8787),
