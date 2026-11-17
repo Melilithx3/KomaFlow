@@ -92,6 +92,25 @@ importers:
         specifier: ^0.34.5
         version: 0.34.5
 
+  tools:
+    dependencies:
+      '@komaflow/contract':
+        specifier: workspace:*
+        version: link:../packages/contract
+      '@komaflow/psd':
+        specifier: workspace:*
+        version: link:../packages/psd
+      ag-psd:
+        specifier: ^34.2.1
+        version: 34.2.1
+      sharp:
+        specifier: ^0.34.5
+        version: 0.34.5
+    devDependencies:
+      tsx:
+        specifier: ^4.23.15
+        version: 4.23.15
+
 packages:
 
   '@cacheable/memory@2.2.0':

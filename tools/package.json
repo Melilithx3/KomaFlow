@@ -1,0 +1,19 @@
+{
+  "name": "@komaflow/tools",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "seed": "tsx seed/seed.ts",
+    "s1": "tsx spikes/s1-psd/run.ts"
+  },
+  "dependencies": {
+    "@komaflow/contract": "workspace:*",
+    "@komaflow/psd": "workspace:*",
+    "ag-psd": "^34.2.1",
+    "sharp": "^0.34.5"
+  },
+  "devDependencies": {
+    "tsx": "^4.23.15"
+  }
+}
