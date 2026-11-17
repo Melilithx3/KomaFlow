@@ -1,8 +1,7 @@
-"""Analysis pipeline (docs/05 §12): layout for all pages in one process, then crops, then OCR for all
-crops in another process. The control process never imports torch."""
+"""Analysis pipeline (docs/05 §12): layout for all pages, then crops, then OCR for all crops.
+Models run in warm worker processes (ADR 0016); the control process never imports torch."""
 from __future__ import annotations
 
-import json
 import subprocess
 import tempfile
 import threading
@@ -41,42 +40,11 @@ class Control:
 
 
 def run_stage(stage: str, backend: str, job: dict, ctl: Control, workdir: Path) -> dict:
-    """Runs one stage in a child process and waits; killing it on cancel frees VRAM at once."""
-    ctl.check()
-    job_path = workdir / f"{stage}-job.json"
-    out_path = workdir / f"{stage}-out.json"
-    job_path.write_text(json.dumps(job, ensure_ascii=False), encoding="utf-8")
-    cmd = [str(be.stage_python(backend)), "-m", "komaflow_sidecar.stage", stage, str(job_path), str(out_path)]
-    log_path = workdir / f"{stage}.log"
-    with log_path.open("w", encoding="utf-8") as err:
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=err, text=True, encoding="utf-8", env=paths.stage_env())
-        ctl.proc = proc
-        killer = threading.Thread(target=_kill_on_cancel, args=(ctl, proc), daemon=True)
-        killer.start()
-        total = len(job["items"])
-        ctl.on_progress(Progress(stage, 0, total))
-        assert proc.stdout is not None
-        for line in proc.stdout:
-            try:
-                ev = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if ev.get("event") == "progress":
-                ctl.on_progress(Progress(stage, int(ev["done"]), int(ev["total"])))
-        code = proc.wait()
-        ctl.proc = None
-    ctl.check()
-    if code != 0:
-        tail = log_path.read_text(encoding="utf-8", errors="replace").splitlines()[-20:]
-        raise RuntimeError(f"{stage} stage failed (exit {code}):\n" + "\n".join(tail))
-    return json.loads(out_path.read_text(encoding="utf-8"))
+    """Runs one stage in its warm worker (ADR 0016); the model stays loaded for the next job."""
+    from .pool import pool
 
-
-def _kill_on_cancel(ctl: Control, proc: subprocess.Popen) -> None:
-    while proc.poll() is None:
-        if ctl.cancel.wait(0.2):
-            proc.kill()
-            return
+    del workdir  # crops live in the caller's temp dir; the worker needs no files of its own
+    return pool().run(stage, backend, job, ctl)
 
 
 def analyze_batch(pages: list[dict], options: dict, ctl: Control | None = None) -> dict:

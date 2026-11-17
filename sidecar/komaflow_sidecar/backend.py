@@ -69,7 +69,19 @@ def choose(requested: str, rocm_info: dict, cpu_installed: bool) -> str:
     raise RuntimeError("no backend installed: run `komaflow-sidecar install`")
 
 
-def capabilities() -> dict:
+_caps_cache: dict[tuple, dict] = {}
+
+
+def capabilities(refresh: bool = False) -> dict:
+    """Backends and models. Importing torch to probe the GPU takes seconds, so the answer is cached per
+    process (and per relevant environment); `refresh=True` probes again (after installing)."""
+    key = tuple(os.environ.get(k) for k in ("KOMAFLOW_SIDECAR_FAKE", "KOMAFLOW_SIDECAR_FAKE_ROCM", "KOMAFLOW_SIDECAR_HOME", "KOMAFLOW_MODELS_DIR"))
+    if refresh or key not in _caps_cache:
+        _caps_cache[key] = _capabilities()
+    return _caps_cache[key]
+
+
+def _capabilities() -> dict:
     rocm = probe_rocm()
     cpu_installed = fake() or paths.env_python(ENVS["cpu"].name).exists()
     from .catalog import MODELS

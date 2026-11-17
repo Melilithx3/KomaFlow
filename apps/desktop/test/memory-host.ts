@@ -25,6 +25,7 @@ export class MemoryHost implements Host {
   pickFolder = async () => null;
   scanImages = async (folder: string) => [...this.files.keys()].filter((p) => p.startsWith(`${folder}/`) && /\.(png|jpe?g|webp)$/i.test(p)).map((p) => this.info(p));
   fileUrl = (p: string) => `mem://${p}`;
+  allowFiles = async () => {};
   makeThumb = async (path: string, ws: string) => {
     // A "thumbnail" that is just a copy is enough for the contract (any image type, any size).
     const bytes = this.files.get(path)!;

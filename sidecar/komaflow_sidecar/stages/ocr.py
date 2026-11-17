@@ -17,8 +17,10 @@ from ..geometry import clean_ocr_text
 MIN_SIDE = 64
 MAX_PIXELS = 1280 * 28 * 28
 
+from . import StageBase, fake_sleep
 
-class Real:
+
+class Real(StageBase):
     def __init__(self, job: dict):
         self.job = job
 
@@ -71,11 +73,17 @@ class Real:
         return {"id": item["id"], "text": clean_ocr_text(text), "new_tokens": len(ids),
                 "truncated": (not hit) and len(ids) >= OCR_MAX_NEW_TOKENS}
 
+    def park(self) -> None:
+        self.dev.park(self.model)
+
+    def unpark(self) -> None:
+        self.dev.unpark(self.model)
+
     def peak_vram_mb(self):
         return self.dev.peak_vram_mb()
 
 
-class Fake:
+class Fake(StageBase):
     def __init__(self, job: dict):
         self.job = job
 
@@ -83,12 +91,9 @@ class Fake:
         return {"model": "fake-ocr", "backend": self.job.get("backend")}
 
     def run(self, item: dict) -> dict:
-        import os
-        import time
-
         from PIL import Image
 
-        time.sleep(float(os.environ.get("KOMAFLOW_SIDECAR_FAKE_DELAY", "0")))
+        fake_sleep(self)
         with Image.open(item["image_path"]) as im:
             w, h = im.size
         return {"id": item["id"], "text": f"テキスト {w}x{h}", "new_tokens": 3, "truncated": False}

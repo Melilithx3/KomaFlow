@@ -269,3 +269,48 @@ def test_models_only_install_needs_an_environment(monkeypatch):
     monkeypatch.setattr(ins, "installed_backend", lambda: "rocm")
     ins.install(["rocm"], ["lama"], log=lambda m: None, models_only=True)
     assert calls == [("model", "lama", "rocm")]
+
+
+# ------------------------------------------------------------------ warm workers (ADR 0016)
+def test_models_stay_warm_between_jobs(pages):
+    from komaflow_sidecar.pool import pool
+
+    analyze_batch(pages, {"stages": ["layout"]}, Control())
+    first = {w["stage"]: w for w in pool().stats()}
+    analyze_batch(pages, {"stages": ["layout"]}, Control())
+    second = {w["stage"]: w for w in pool().stats()}
+    assert second["layout"]["pid"] == first["layout"]["pid"]
+    assert second["layout"]["loads"] == 1  # loaded once, reused
+
+
+def test_other_gpu_models_are_parked_not_killed(pages):
+    from komaflow_sidecar.pool import pool
+
+    analyze_batch(pages, {}, Control())  # layout, then OCR on the fake GPU
+    states = {w["stage"]: w["state"] for w in pool().stats()}
+    assert states == {"layout": "parked", "ocr": "ready"}
+    pid = {w["stage"]: w["pid"] for w in pool().stats()}["layout"]
+    analyze_batch(pages, {"stages": ["layout"]}, Control())
+    after = {w["stage"]: w for w in pool().stats()}
+    assert after["layout"]["pid"] == pid and after["layout"]["state"] == "ready"
+    assert after["ocr"]["state"] == "parked"
+
+
+def test_progress_reports_model_loading(pages):
+    seen = []
+    analyze_batch(pages, {"stages": ["layout"]}, Control(on_progress=lambda p: seen.append(p.stage)))
+    assert seen[0] == "layout:loading"
+    seen.clear()
+    analyze_batch(pages, {"stages": ["layout"]}, Control(on_progress=lambda p: seen.append(p.stage)))
+    assert "layout:loading" not in seen  # warm: no loading step
+
+
+def test_cancel_keeps_the_worker_when_it_stops_in_time(pages, monkeypatch):
+    from komaflow_sidecar.pool import pool
+
+    monkeypatch.setenv("KOMAFLOW_SIDECAR_FAKE_DELAY", "5")
+    ctl = Control()
+    threading.Timer(1.0, ctl.cancel.set).start()
+    with pytest.raises(Cancelled):
+        analyze_batch(pages, {"stages": ["layout"]}, ctl)
+    assert [w["state"] for w in pool().stats()] == ["ready"]

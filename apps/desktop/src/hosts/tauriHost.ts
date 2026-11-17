@@ -12,6 +12,7 @@ export const tauriHost: Host = {
   },
   scanImages: (folder) => invoke<ImageInfo[]>('scan_images', { folder }),
   fileUrl: (path) => convertFileSrc(path),
+  allowFiles: (paths) => invoke<void>('allow_files', { paths }),
   makeThumb: (path, workspaceId) => invoke<ImageInfo>('make_thumb', { path, workspaceId }),
   readText: (rel) => invoke<string | null>('ws_read_text', { rel }),
   writeTextAtomic: (rel, text) => invoke<void>('ws_write_text', { rel, text }),

@@ -3,7 +3,7 @@ import { ApiClient, ApiFailure } from '../core/api.js';
 import type { Host } from '../core/host.js';
 import type { Workspace } from '../core/model.js';
 import { SidecarClient, type SidecarCaps } from '../core/sidecar.js';
-import { loadWorkspace } from '../core/workspace.js';
+import { loadWorkspace, workspaceFiles } from '../core/workspace.js';
 import { Editor } from './Editor.js';
 import { Home } from './Home.js';
 import { loadSettings, saveSettings, type Settings } from './session.js';
@@ -16,7 +16,12 @@ export interface AppCtx {
   caps: SidecarCaps | null;
   user: string | null;
   setSettings: (s: Settings) => void;
+  engine: EngineState;
+  restartEngine: () => void;
 }
+
+/** Sidecar status shown on the start screen. */
+export type EngineState = { state: 'starting' } | { state: 'none' } | { state: 'ready'; url: string } | { state: 'error'; error: string };
 
 export function App({ host }: { host: Host }) {
   const [settings, setSettings] = useState(() => loadSettings(host));
@@ -48,19 +53,30 @@ export function App({ host }: { host: Host }) {
   }, [host, settings.serverUrl]);
 
   // the sidecar is optional: without it the app works manually (docs/05 §5)
+  const [engine, setEngine] = useState<EngineState>({ state: 'starting' });
+  const [engineRun, setEngineRun] = useState(0);
   useEffect(() => {
+    let alive = true;
+    setEngine({ state: 'starting' });
+    setSidecar(null);
+    setCaps(null);
     void (async () => {
       try {
         const s = await host.startSidecar();
-        if (!s) return;
+        if (!alive) return;
+        if (!s) return setEngine({ state: 'none' });
         const c = new SidecarClient(host, s.url, s.token);
         setSidecar(c);
+        setEngine({ state: 'ready', url: s.url });
         setCaps(await c.capabilities());
-      } catch {
-        setSidecar(null);
+      } catch (e) {
+        if (alive) setEngine({ state: 'error', error: e instanceof Error ? e.message : String(e) });
       }
     })();
-  }, [host]);
+    return () => {
+      alive = false;
+    };
+  }, [host, engineRun]);
 
   const updateSettings = useCallback((s: Settings) => {
     saveSettings(s);
@@ -68,7 +84,7 @@ export function App({ host }: { host: Host }) {
   }, []);
 
   if (!api) return <div className="center">Загрузка…</div>;
-  const ctx: AppCtx = { host, api, settings, sidecar, caps, user, setSettings: updateSettings };
+  const ctx: AppCtx = { host, api, settings, sidecar, caps, user, setSettings: updateSettings, engine, restartEngine: () => setEngineRun((n) => n + 1) };
 
   if (ws) return <Editor ctx={ctx} initial={ws} onClose={() => setWs(null)} />;
   return (
@@ -88,10 +104,15 @@ export function App({ host }: { host: Host }) {
         await host.setToken(settings.serverUrl, null);
         setUser(null);
       }}
-      onOpen={async (w) => setWs(w)}
+      onOpen={async (w) => {
+        await host.allowFiles(workspaceFiles(w));
+        setWs(w);
+      }}
       onOpenSaved={async (id) => {
         const w = await loadWorkspace(host, id);
-        if (w) setWs(w);
+        if (!w) return;
+        await host.allowFiles(workspaceFiles(w));
+        setWs(w);
       }}
     />
   );

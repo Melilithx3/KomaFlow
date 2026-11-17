@@ -24,8 +24,10 @@ def class_limit(job: dict, name: str, recommended: float) -> float:
         return float(job["threshold"])
     return float(recommended)
 
+from . import StageBase, fake_sleep
 
-class Real:
+
+class Real(StageBase):
     def __init__(self, job: dict):
         self.job = job
 
@@ -89,11 +91,17 @@ class Real:
                 dets.append({"class": name, "score": round(float(score), 4), "xyxy": [float(v) for v in box]})
         return {"id": item["id"], "width": int(w), "height": int(h), "detections": dets}
 
+    def park(self) -> None:
+        self.dev.park(self.net)
+
+    def unpark(self) -> None:
+        self.dev.unpark(self.net)
+
     def peak_vram_mb(self):
         return self.dev.peak_vram_mb()
 
 
-class Fake:
+class Fake(StageBase):
     """Deterministic stand-in for tests and machines without models (KOMAFLOW_SIDECAR_FAKE=1)."""
 
     def __init__(self, job: dict):
@@ -103,12 +111,9 @@ class Fake:
         return {"model": "fake-layout", "backend": self.job.get("backend")}
 
     def run(self, item: dict) -> dict:
-        import os
-        import time
-
         from PIL import Image
 
-        time.sleep(float(os.environ.get("KOMAFLOW_SIDECAR_FAKE_DELAY", "0")))
+        fake_sleep(self)
         with Image.open(item["image_path"]) as im:
             w, h = im.size
         dets = [

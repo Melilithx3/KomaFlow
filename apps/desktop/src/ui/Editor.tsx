@@ -99,7 +99,7 @@ export function Editor({ ctx, initial, onClose }: { ctx: AppCtx; initial: Worksp
   );
 
   /** Step 1: layout only (boxes), so the cleaner can fix overlaps, duplicates and misses before OCR. */
-  const runLayout = useCallback(
+  const runLayoutInner = useCallback(
     async (pages: LocalPage[]) => {
       const blocker = analysisBlocker(ctx.caps);
       if (blocker || !ctx.sidecar) return setMessage(blocker);
@@ -112,7 +112,9 @@ export function Editor({ ctx, initial, onClose }: { ctx: AppCtx; initial: Worksp
       );
       setTask({ label: 'Разметка', done: 0, total: pages.length, cancel: () => void sc.cancel(jobId) });
       try {
-        const j = await sc.wait<AnalyzeResult>(jobId, (x) => setTask((t) => t && { ...t, done: x.progress.done, total: x.progress.total || t.total }));
+        const j = await sc.wait<AnalyzeResult>(jobId, (x) =>
+          setTask((t) => t && { ...t, label: stageLabel(x.stage, 'Разметка'), done: x.progress.done, total: x.progress.total || t.total }),
+        );
         if (j.state === 'done' && j.result) {
           for (const r of j.result.pages) store.exec(ApplyAnalysis(r.page_id, r.objects, store.get().ws.reading_direction));
           store.patch((w) => ({ ...w, pages: w.pages.map((p) => (j.result!.pages.some((r) => r.page_id === p.id) ? { ...p, analyzed: true } : p)) }));
@@ -126,7 +128,7 @@ export function Editor({ ctx, initial, onClose }: { ctx: AppCtx; initial: Worksp
   );
 
   /** Step 2: OCR of the existing (corrected) boxes, rotated ones straightened. */
-  const runOcr = useCallback(
+  const runOcrInner = useCallback(
     async (pages: LocalPage[], onlyIds?: string[]) => {
       const blocker = ocrBlocker(ctx.caps);
       if (blocker || !ctx.sidecar) return setMessage(blocker);
@@ -146,7 +148,9 @@ export function Editor({ ctx, initial, onClose }: { ctx: AppCtx; initial: Worksp
       const jobId = await sc.ocrBatch(req, sidecarOptions(ctx.settings));
       setTask({ label: 'OCR', done: 0, total, cancel: () => void sc.cancel(jobId) });
       try {
-        const j = await sc.wait<OcrBatchResult>(jobId, (x) => setTask((t) => t && { ...t, done: x.progress.done, total: x.progress.total || t.total }));
+        const j = await sc.wait<OcrBatchResult>(jobId, (x) =>
+          setTask((t) => t && { ...t, label: stageLabel(x.stage, 'OCR'), done: x.progress.done, total: x.progress.total || t.total }),
+        );
         if (j.state === 'done' && j.result) {
           for (const r of j.result.pages) store.exec(ApplyOcr(r.page_id, new Map(r.results.map((x) => [x.id, x.source_text]))));
           setMessage(`OCR готов: ${total} боксов.`);
@@ -156,6 +160,30 @@ export function Editor({ ctx, initial, onClose }: { ctx: AppCtx; initial: Worksp
       }
     },
     [ctx, store],
+  );
+
+  /** Engine errors (no reply, crashed worker…) end up in the status bar instead of being lost. */
+  const runLayout = useCallback(
+    async (pages: LocalPage[]) => {
+      try {
+        await runLayoutInner(pages);
+      } catch (e) {
+        setTask(null);
+        setMessage(`Разметка: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    },
+    [runLayoutInner],
+  );
+  const runOcr = useCallback(
+    async (pages: LocalPage[], onlyIds?: string[]) => {
+      try {
+        await runOcrInner(pages, onlyIds);
+      } catch (e) {
+        setTask(null);
+        setMessage(`OCR: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    },
+    [runOcrInner],
   );
 
   // keyboard shortcuts (docs/05 §2)
@@ -570,4 +598,10 @@ function OrderNumber({ n, max, color, shape, onChange }: { n: number; max: numbe
       {n}
     </button>
   );
+}
+
+/** «Загрузка модели…» while a cold model loads; later runs reuse the warm one (ADR 0016). */
+function stageLabel(stage: string, fallback: string): string {
+  if (stage.endsWith(':loading')) return `${fallback}: загрузка модели (только при первом запуске)…`;
+  return fallback;
 }

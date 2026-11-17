@@ -48,6 +48,7 @@ export const browserHost: Host = {
   },
   scanImages: async (folder) => (folders.get(folder) ?? []).map((p) => files.get(p)!.info),
   fileUrl: (path) => files.get(path)?.url ?? '',
+  allowFiles: async () => {},
   async makeThumb(path) {
     const f = files.get(path)!;
     const bmp = await createImageBitmap(new Blob([f.bytes as BlobPart], { type: f.info.mime }));

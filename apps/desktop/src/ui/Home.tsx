@@ -19,7 +19,7 @@ interface Props {
 
 /** Start screen: sign-in, local chapters, open a folder, download from the server, settings. */
 export function Home({ ctx, onSettings, onLogin, onLogout, onOpen, onOpenSaved }: Props) {
-  const { host, settings, user, caps } = ctx;
+  const { host, settings, user } = ctx;
   const [saved, setSaved] = useState<Workspace[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -93,7 +93,7 @@ export function Home({ ctx, onSettings, onLogin, onLogout, onOpen, onOpenSaved }
 
       <section className="card">
         <h2>Движок анализа</h2>
-        <p className="muted">{analysisBlocker(caps) ?? `Готов: ${caps!.backends.filter((b) => b.available).map((b) => (b.id === 'rocm' ? `ROCm (${b.device ?? b.arch})` : 'CPU')).join(', ')}`}</p>
+        <EngineStatus ctx={ctx} />
         <div className="row">
           <label>
             Бэкенд{' '}
@@ -194,5 +194,32 @@ function LoginForm({ settings, onLogin }: { settings: Settings; onLogin: (url: s
       {err && <p className="error">{err}</p>}
       <button className="primary">Войти</button>
     </form>
+  );
+}
+
+function EngineStatus({ ctx }: { ctx: AppCtx }) {
+  const e = ctx.engine;
+  if (e.state === 'starting') return <p className="muted">Запускаю движок…</p>;
+  if (e.state === 'none') return <p className="muted">Движок не установлен: анализ и автоклин недоступны, всё остальное работает вручную.</p>;
+  if (e.state === 'error')
+    return (
+      <div>
+        <p className="error">Движок не запустился:</p>
+        <pre className="log">{e.error}</pre>
+        <button onClick={ctx.restartEngine}>Перезапустить движок</button>
+      </div>
+    );
+  const blocker = analysisBlocker(ctx.caps);
+  return (
+    <p className="row">
+      <span className={blocker ? 'muted' : 'ok'}>
+        {!ctx.caps
+          ? 'Движок запущен, проверяю видеокарту…'
+          : (blocker ?? `Готов: ${ctx.caps.backends.filter((b) => b.available).map((b) => (b.id === 'rocm' ? `ROCm (${b.device ?? b.arch})` : 'CPU')).join(', ')}. Модели остаются загруженными между запусками.`)}
+      </span>
+      <button className="tiny" onClick={ctx.restartEngine}>
+        Перезапустить
+      </button>
+    </p>
   );
 }

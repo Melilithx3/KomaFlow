@@ -27,6 +27,8 @@ export interface Host {
   scanImages(folder: string): Promise<ImageInfo[]>;
   /** URL the WebView can show for a local file. */
   fileUrl(path: string): string;
+  /** Lets the WebView show these files (folders of an opened workspace; needed again after a restart). */
+  allowFiles(paths: string[]): Promise<void>;
   /** WebP thumbnail ~400 px wide; returns its file info (stored in the workspace thumbs/). */
   makeThumb(path: string, workspaceId: string): Promise<ImageInfo>;
 

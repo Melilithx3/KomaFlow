@@ -4,7 +4,8 @@ Local model service for the komaflow desktop: page layout (`mayocream/koharu-lay
 crops → OCR (`PaddlePaddle/PaddleOCR-VL-1.6`), PyTorch with ROCm (gfx1030/1031/1032) or CPU.
 No ONNX, no DirectML. Versions and workarounds come from the user's benchmark (`reference/bench/`).
 
-- Each heavy stage runs in its own child process (`python -m komaflow_sidecar.stage`) that exits
+- Models run in warm worker processes (`python -m komaflow_sidecar.worker`, ADR 0016): loaded once, parked in RAM
+  when another model needs the GPU, stopped after an idle hour; cancel stops them only if they hang. Previously each stage
   afterwards, so VRAM is always returned; cancel kills the process.
 - OCR is disabled on CPU (too slow); layout works on CPU.
 - MIOpen kernel cache is persistent: `%LOCALAPPDATA%/komaflow/sidecar/cache/miopen`.

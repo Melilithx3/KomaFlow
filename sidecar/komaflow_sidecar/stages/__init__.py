@@ -34,3 +34,39 @@ class TorchDevice:
 
     def inference(self):
         return self.torch.inference_mode()
+
+    def park(self, *modules) -> None:
+        """Weights to CPU RAM and VRAM released; the model stays loaded (ADR 0016)."""
+        if self.kind != "rocm":
+            return
+        for m in modules:
+            m.to("cpu")
+        self.torch.cuda.empty_cache()
+
+    def unpark(self, *modules) -> None:
+        if self.kind != "rocm":
+            return
+        for m in modules:
+            m.to(self.device)
+
+
+class StageBase:
+    """Defaults shared by real and fake stages; the worker sets `should_stop` and `job`."""
+
+    should_stop = staticmethod(lambda: False)
+
+    def park(self) -> None:
+        pass
+
+    def unpark(self) -> None:
+        pass
+
+
+def fake_sleep(self) -> None:
+    """Test delay that a cancel can interrupt (KOMAFLOW_SIDECAR_FAKE_DELAY seconds)."""
+    import os
+    import time
+
+    end = time.monotonic() + float(os.environ.get("KOMAFLOW_SIDECAR_FAKE_DELAY", "0"))
+    while time.monotonic() < end and not self.should_stop():
+        time.sleep(0.02)

@@ -30,6 +30,10 @@ export function workspaceFromImages(title: string, images: ImageInfo[], dir: Rea
   };
 }
 
+/** All local files of a workspace (raw, clean, notes, thumbnails) — to allow them for the WebView. */
+export const workspaceFiles = (ws: Workspace): string[] =>
+  ws.pages.flatMap((p) => [p.raw, p.clean, p.notes, p.thumb].filter((f): f is FileRef => !!f).map((f) => f.path));
+
 /** Markup that the server stores for a page; equal digests mean «не изменена после публикации». */
 export function pageDigest(p: LocalPage): string {
   return sha256Hex(

@@ -26,7 +26,7 @@ import {
 import { lamaBlocker, type InpaintResult } from '../core/sidecar.js';
 import type { Store } from '../core/store.js';
 import type { AppCtx } from './App.js';
-import { decodeBytes, encodePng, loadRaster } from './cleanIO.js';
+import { decodeBytes, encodePng } from './cleanIO.js';
 
 export type CleanTool = 'brush' | 'eraser' | 'fill' | 'stamp' | 'mask';
 
@@ -210,8 +210,8 @@ export function CleanEditor(p: Props) {
       const pg = p.page;
       try {
         const [rw, base] = await Promise.all([
-          loadRaster(p.ctx.host.fileUrl(pg.raw.path)),
-          pg.clean ? loadRaster(p.ctx.host.fileUrl(pg.clean.path)) : null,
+          p.ctx.host.readFile(pg.raw.path).then(decodeBytes),
+          pg.clean ? p.ctx.host.readFile(pg.clean.path).then(decodeBytes) : null,
         ]);
         if (!alive) return;
         raw.current = rw;
@@ -286,6 +286,14 @@ export function CleanEditor(p: Props) {
   };
 
   const runLama = async () => {
+    try {
+      await runLamaInner();
+    } catch (e) {
+      props.current.setTask(null);
+      props.current.setMessage(`LaMa: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+  const runLamaInner = async () => {
     const { ctx, store, setTask, setMessage } = props.current;
     const blocker = lamaBlocker(ctx.caps);
     const w = work.current;
@@ -318,6 +326,14 @@ export function CleanEditor(p: Props) {
 
   /** Auto-clean of the whole chapter: text masks from all boxes, one LaMa job, results bound as cleans. */
   const autoCleanChapter = async () => {
+    try {
+      await autoCleanChapterInner();
+    } catch (e) {
+      props.current.setTask(null);
+      props.current.setMessage(`Автоклин: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+  const autoCleanChapterInner = async () => {
     const { ctx, store, setTask, setMessage } = props.current;
     const blocker = lamaBlocker(ctx.caps);
     if (blocker || !ctx.sidecar) return setMessage(blocker);
@@ -330,7 +346,7 @@ export function CleanEditor(p: Props) {
     const items: Array<{ id: string; image_path: string; mask_path: string; out_path: string }> = [];
     setTask({ label: 'Маски', done: 0, total: pages.length });
     for (const [i, pg] of pages.entries()) {
-      const base = await loadRaster(ctx.host.fileUrl((pg.clean ?? pg.raw).path));
+      const base = await decodeBytes(await ctx.host.readFile((pg.clean ?? pg.raw).path));
       const m = new Uint8Array(base.width * base.height);
       for (const o of pg.objects) textMask(base, o.box, m, { threshold: mp.threshold, dilate: mp.dilate, inset: 0.04 });
       if (!maskBounds(m, base.width, base.height)) continue;

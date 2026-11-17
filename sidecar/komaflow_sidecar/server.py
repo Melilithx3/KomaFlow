@@ -112,8 +112,12 @@ def make_handler(token: str, jobs: JobQueue):
                 return
             if self.path == "/health":
                 return self._send(200, {"ok": True, "version": __version__})
-            if self.path == "/capabilities":
-                return self._send(200, be.capabilities())
+            if self.path.startswith("/capabilities"):
+                return self._send(200, be.capabilities(refresh="refresh=1" in self.path))
+            if self.path == "/workers":
+                from .pool import pool
+
+                return self._send(200, {"workers": pool().stats()})
             if self.path.startswith("/jobs/"):
                 job = jobs.get(self.path[len("/jobs/"):])
                 return self._send(200, job.to_dict()) if job else self._send(404, {"error": "no such job"})

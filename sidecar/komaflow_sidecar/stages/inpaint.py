@@ -26,8 +26,10 @@ def mask_crop(mask_bbox: tuple[int, int, int, int] | None, w: int, h: int, pad_m
     y1 = min(h, y1 + CONTEXT_PX)
     return x0, y0, x1, y1
 
+from . import StageBase, fake_sleep
 
-class Real:
+
+class Real(StageBase):
     def __init__(self, job: dict):
         self.job = job
 
@@ -76,11 +78,17 @@ class Real:
         im.save(item["out_path"])
         return {"id": item["id"], "out_path": item["out_path"], "masked_px": int(mask.sum())}
 
+    def park(self) -> None:
+        self.dev.park(self.net)
+
+    def unpark(self) -> None:
+        self.dev.unpark(self.net)
+
     def peak_vram_mb(self):
         return self.dev.peak_vram_mb()
 
 
-class Fake:
+class Fake(StageBase):
     """Test stand-in: paints masked pixels white."""
 
     def __init__(self, job: dict):
@@ -90,12 +98,9 @@ class Fake:
         return {"model": "fake-lama", "backend": self.job.get("backend")}
 
     def run(self, item: dict) -> dict:
-        import os
-        import time
-
         from PIL import Image
 
-        time.sleep(float(os.environ.get("KOMAFLOW_SIDECAR_FAKE_DELAY", "0")))
+        fake_sleep(self)
         im = Image.open(item["image_path"]).convert("RGB")
         m = Image.open(item["mask_path"]).convert("L").point(lambda v: 255 if v > 127 else 0)
         white = Image.new("RGB", im.size, (255, 255, 255))

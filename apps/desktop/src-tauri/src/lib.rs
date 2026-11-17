@@ -334,42 +334,102 @@ fn device_name() -> String {
 
 // ------------------------------------------------------------------ commands: sidecar
 
-/// Starts `python -m komaflow_sidecar serve` from the installed engine env (ROCm, else CPU) with
-/// the bundled sources on PYTHONPATH; returns None when no engine is installed (manual mode).
-#[tauri::command]
+/// Where the sidecar sources are: KOMAFLOW_SIDECAR_SRC, then (debug builds) the repository's `sidecar/`,
+/// then the bundled resources. `tauri dev` does not always copy resources, so dev uses the repo directly.
+fn sidecar_src(app: &tauri::AppHandle) -> CmdResult<PathBuf> {
+    let mut tried = Vec::new();
+    let mut candidates = Vec::new();
+    if let Ok(p) = std::env::var("KOMAFLOW_SIDECAR_SRC") {
+        candidates.push(PathBuf::from(p));
+    }
+    if cfg!(debug_assertions) {
+        candidates.push(Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..").join("..").join("sidecar"));
+    }
+    if let Ok(r) = app.path().resource_dir() {
+        candidates.push(r.join("sidecar"));
+    }
+    for c in candidates {
+        if c.join("komaflow_sidecar").join("__init__.py").is_file() {
+            return Ok(c);
+        }
+        tried.push(c.to_string_lossy().into_owned());
+    }
+    Err(format!("sidecar sources not found, tried: {}", tried.join("; ")))
+}
+
+fn log_tail(path: &Path, n: usize) -> String {
+    let text = std::fs::read_to_string(path).unwrap_or_default();
+    let lines: Vec<&str> = text.lines().collect();
+    lines[lines.len().saturating_sub(n)..].join("\n")
+}
+
+/// Starts `python -m komaflow_sidecar serve` from the installed engine env (ROCm, else CPU).
+/// Ok(None) = no engine installed (manual mode). Errors carry the tail of `sidecar.log`.
+/// Runs off the UI thread: Python start-up takes a moment.
+#[tauri::command(async)]
 fn sidecar_start(app: tauri::AppHandle, state: State<'_, SidecarState>) -> CmdResult<Option<SidecarInfo>> {
     use std::io::BufRead;
     use std::process::{Command, Stdio};
 
-    let envs = app_root()?.join("sidecar").join("envs");
-    let python = ["torch-rocm", "torch-cpu"].iter().map(|e| envs.join(e).join("Scripts").join("python.exe")).find(|p| p.is_file());
+    let root = app_root()?.join("sidecar");
+    let python = ["torch-rocm", "torch-cpu"].iter().map(|e| root.join("envs").join(e).join("Scripts").join("python.exe")).find(|p| p.is_file());
     let Some(python) = python else { return Ok(None) };
-    let src = app.path().resource_dir().map_err(err)?.join("sidecar");
+    let src = sidecar_src(&app)?;
+    let logs = root.join("logs");
+    std::fs::create_dir_all(&logs).map_err(err)?;
+    let log_path = logs.join("sidecar.log");
+    let log = std::fs::OpenOptions::new().create(true).append(true).open(&log_path).map_err(err)?;
     let token = uuid::Uuid::new_v4().simple().to_string();
 
     let mut guard = state.0.lock().map_err(err)?;
     if let Some(mut old) = guard.take() {
         let _ = old.kill();
     }
-    let mut cmd = Command::new(python);
+    let mut cmd = Command::new(&python);
     cmd.args(["-m", "komaflow_sidecar", "serve", "--token", &token])
         .env("PYTHONPATH", &src)
         .env("PYTHONUTF8", "1")
         .stdout(Stdio::piped())
-        .stderr(Stdio::null());
+        .stderr(Stdio::from(log));
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
     }
-    let mut child = cmd.spawn().map_err(err)?;
+    let mut child = cmd.spawn().map_err(|e| format!("cannot start {}: {e}", python.display()))?;
     let stdout = child.stdout.take().ok_or("no stdout")?;
+    let mut reader = std::io::BufReader::new(stdout);
     let mut line = String::new();
-    std::io::BufReader::new(stdout).read_line(&mut line).map_err(err)?;
-    let v: serde_json::Value = serde_json::from_str(line.trim()).map_err(|e| format!("sidecar did not start: {e}: {line}"))?;
-    let port = v["port"].as_u64().ok_or("sidecar did not report a port")?;
+    reader.read_line(&mut line).map_err(err)?;
+    let parsed: Option<u64> = serde_json::from_str::<serde_json::Value>(line.trim()).ok().and_then(|v| v["port"].as_u64());
+    let Some(port) = parsed else {
+        let _ = child.kill();
+        return Err(format!(
+            "engine did not start (sources: {}).\n{}\nlog: {}",
+            src.display(),
+            log_tail(&log_path, 15),
+            log_path.display()
+        ));
+    };
+    // keep draining stdout so the sidecar never writes into a closed pipe
+    std::thread::spawn(move || for _ in reader.lines() {});
     *guard = Some(child);
     Ok(Some(SidecarInfo { url: format!("http://127.0.0.1:{port}"), token }))
+}
+
+/// Lets the WebView show page files of an opened workspace (the asset scope is not persisted
+/// between runs, so after a restart the folders of raw/clean/notes files must be allowed again).
+#[tauri::command]
+fn allow_files(app: tauri::AppHandle, paths: Vec<String>) -> CmdResult<()> {
+    let mut dirs: Vec<PathBuf> = paths.iter().filter_map(|p| Path::new(p).parent().map(|d| d.to_path_buf())).collect();
+    dirs.sort();
+    dirs.dedup();
+    for d in dirs {
+        if d.is_dir() {
+            allow_dir(&app, &d);
+        }
+    }
+    Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -398,7 +458,8 @@ pub fn run() {
             token_get,
             token_set,
             device_name,
-            sidecar_start
+            sidecar_start,
+            allow_files
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::Destroyed = event {
