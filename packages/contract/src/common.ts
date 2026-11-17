@@ -17,6 +17,9 @@ export const Box = z.strictObject({
 });
 export type Box = z.infer<typeof Box>;
 
+/** Box rotation around its centre, whole degrees, clockwise on screen (ADR 0011). */
+export const Rotation = z.number().int().min(-180).max(180);
+
 export const OBJECT_TYPES = ['bubble', 'sfx', 'onomatopoeia', 'text'] as const;
 export const ObjectType = z.enum(OBJECT_TYPES);
 export type ObjectType = z.infer<typeof ObjectType>;

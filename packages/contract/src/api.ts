@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { Box, ClientKind, Id, LIMITS, ObjectType, ReadingDirection, Sha256, TranslationState, MAX_SIDE_PX } from './common.js';
+import { Box, Rotation, ClientKind, Id, LIMITS, ObjectType, ReadingDirection, Sha256, TranslationState, MAX_SIDE_PX } from './common.js';
 import {
   ChapterDTO,
   ChapterListItem,
@@ -96,6 +96,7 @@ export const SyncObject = z.strictObject({
   type: ObjectType,
   box: Box,
   text_box: Box.nullable().optional(),
+  rotation: Rotation.optional(),
   source_text: z.string().max(LIMITS.source_text).optional(),
 });
 export type SyncObject = z.infer<typeof SyncObject>;

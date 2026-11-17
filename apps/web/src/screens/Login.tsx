@@ -41,6 +41,12 @@ export function LoginScreen() {
   return (
     <div className="login">
       <form onSubmit={(e) => void submit(e)} className="card">
+        <div className="brand">
+          <span className="logo" aria-hidden>
+            K
+          </span>
+          {t.appName}
+        </div>
         <h1>{t.login.title}</h1>
         <label>
           {t.login.login}

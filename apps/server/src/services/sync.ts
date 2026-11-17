@@ -153,7 +153,7 @@ function applyPage(
     thumb_hash: p.thumb_hash === undefined ? (row?.thumb_hash ?? null) : p.thumb_hash,
   };
   const stored = row ? ctx.db.all<ObjectRow>('SELECT * FROM objects WHERE page_id = ?', p.id) : [];
-  const next = p.objects.map((o) => ({ id: o.id, type: o.type, box: o.box, text_box: o.text_box ?? null }));
+  const next = p.objects.map((o) => ({ id: o.id, type: o.type, box: o.box, text_box: o.text_box ?? null, rotation: o.rotation ?? 0 }));
   const diff = diffMarkup(
     row
       ? {
@@ -162,6 +162,7 @@ function applyPage(
             type: o.type,
             box: { x: o.x, y: o.y, w: o.w, h: o.h },
             text_box: o.tx === null ? null : { x: o.tx, y: o.ty!, w: o.tw!, h: o.th! },
+            rotation: o.rot,
             ord: o.ord,
             deleted: o.deleted === 1,
           })),
@@ -208,8 +209,8 @@ function applyPage(
     const s = storedById.get(o.id);
     if (!s) {
       ctx.db.run(
-        `INSERT INTO objects (id, page_id, type, x, y, w, h, tx, ty, tw, th, ord, source_text, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO objects (id, page_id, type, x, y, w, h, tx, ty, tw, th, ord, rot, source_text, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         o.id,
         p.id,
         o.type,
@@ -222,6 +223,7 @@ function applyPage(
         tb?.w ?? null,
         tb?.h ?? null,
         i + 1,
+        o.rotation ?? 0,
         o.source_text ?? '',
         at,
         at,
@@ -229,7 +231,7 @@ function applyPage(
     } else if (geometry.has(o.id)) {
       // source_text of existing objects is owned by the web and ignored here.
       ctx.db.run(
-        `UPDATE objects SET type = ?, x = ?, y = ?, w = ?, h = ?, tx = ?, ty = ?, tw = ?, th = ?, ord = ?, deleted = 0,
+        `UPDATE objects SET type = ?, x = ?, y = ?, w = ?, h = ?, tx = ?, ty = ?, tw = ?, th = ?, ord = ?, rot = ?, deleted = 0,
                 geometry_ver = geometry_ver + 1 WHERE id = ?`,
         o.type,
         o.box.x,
@@ -241,6 +243,7 @@ function applyPage(
         tb?.w ?? null,
         tb?.h ?? null,
         i + 1,
+        o.rotation ?? 0,
         o.id,
       );
     }

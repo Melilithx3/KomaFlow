@@ -7,6 +7,8 @@ export interface MarkupObjectState {
   type: ObjectType;
   box: Box;
   text_box: Box | null;
+  /** Degrees; absent = 0. */
+  rotation?: number;
 }
 
 export interface StoredMarkupObject extends MarkupObjectState {
@@ -69,7 +71,7 @@ export function diffMarkup(
       s.retyped.push(o.id);
       geometry.add(o.id);
     }
-    if (!boxesEqual(p.box, o.box) || !boxesEqual(p.text_box, o.text_box)) {
+    if (!boxesEqual(p.box, o.box) || !boxesEqual(p.text_box, o.text_box) || (p.rotation ?? 0) !== (o.rotation ?? 0)) {
       s.moved.push(o.id);
       geometry.add(o.id);
     }

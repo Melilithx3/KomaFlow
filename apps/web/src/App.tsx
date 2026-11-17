@@ -1,10 +1,11 @@
 import { useEffect, type ReactNode } from 'react';
 import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from '@tanstack/react-query';
-import { BrowserRouter, Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router';
+import { BrowserRouter, Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router';
 import type { MeResponse } from '@komaflow/contract';
 import { api, HttpError, setUnauthenticatedHandler } from './lib/api.js';
 import { useOnline } from './lib/online.js';
 import { t } from './strings.js';
+import { Icon } from './components/Icon.js';
 import { LoginScreen } from './screens/Login.js';
 import { ProjectsScreen } from './screens/Projects.js';
 import { ChapterScreen } from './screens/Chapter.js';
@@ -76,6 +77,7 @@ function Authed() {
 
 function Shell({ children }: { children: ReactNode }) {
   const online = useOnline();
+  const loc = useLocation();
   const nav = useNavigate();
   const qc = useQueryClient();
   const logout = async () => {
@@ -90,13 +92,20 @@ function Shell({ children }: { children: ReactNode }) {
     <div className="shell">
       <header className="topbar">
         <Link to="/" className="brand">
+          <span className="logo" aria-hidden>
+            K
+          </span>
           {t.appName}
         </Link>
         <nav>
-          <Link to="/">{t.nav.projects}</Link>
-          <Link to="/settings">{t.nav.settings}</Link>
-          <button className="ghost" onClick={() => void logout()}>
-            {t.nav.logout}
+          <NavLink to="/" end>
+            <Icon name="book" size={16} /> <span className="nav-text">{t.nav.projects}</span>
+          </NavLink>
+          <NavLink to="/settings">
+            <Icon name="settings" size={16} /> <span className="nav-text">{t.nav.settings}</span>
+          </NavLink>
+          <button className="ghost" onClick={() => void logout()} title={t.nav.logout} aria-label={t.nav.logout}>
+            <Icon name="logout" size={16} /> <span className="nav-text">{t.nav.logout}</span>
           </button>
         </nav>
       </header>
@@ -105,7 +114,7 @@ function Shell({ children }: { children: ReactNode }) {
           {t.offline}
         </div>
       )}
-      <main>{children}</main>
+      <main className={loc.pathname.startsWith('/pages/') ? 'fill' : undefined}>{children}</main>
     </div>
   );
 }

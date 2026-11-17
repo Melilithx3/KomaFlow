@@ -15,6 +15,7 @@ const obj = (over: Partial<ObjectDTO> = {}): ObjectDTO => ({
   type: 'bubble',
   box: { x: 0, y: 0, w: 10, h: 10 },
   text_box: null,
+  rotation: 0,
   geometry_ver: 1,
   source_text: 'src',
   translation: '',

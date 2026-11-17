@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { Box, ClientKind, Id, IsoDateTime, ObjectType, ReadingDirection, Sha256, TranslationState } from './common.js';
+import { Box, Rotation, ClientKind, Id, IsoDateTime, ObjectType, ReadingDirection, Sha256, TranslationState } from './common.js';
 import { ExportLayers, ProjectSettings } from './settings.js';
 
 export const UserDTO = z.object({ id: Id, login: z.string(), display_name: z.string() });
@@ -56,6 +56,7 @@ export const ObjectDTO = z.object({
   type: ObjectType,
   box: Box,
   text_box: Box.nullable(),
+  rotation: Rotation,
   geometry_ver: z.number().int(),
   source_text: z.string(),
   translation: z.string(),

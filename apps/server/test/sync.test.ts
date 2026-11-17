@@ -177,6 +177,18 @@ describe('sync', () => {
     expect(obj.geometry_ver).toBe(2);
   });
 
+  it('rotation is stored, bumps markup, is idempotent and validated', async () => {
+    const p = fixtureSyncPage(pages[0]!, 1);
+    p.objects[0]!.rotation = -12;
+    const r = await sync([p]);
+    expect(r.json.pages[0]).toMatchObject({ markup_rev: 2, summary: { moved: [p.objects[0]!.id] } });
+    const obj = (await web.req('GET', `/pages/${pages[0]!.id}`)).json.objects[0];
+    expect(obj.rotation).toBe(-12);
+    expect((await sync([{ ...p, base_markup_rev: 2 }])).json.pages[0].changed).toBe(false);
+    p.objects[0]!.rotation = 200;
+    expect((await sync([{ ...p, base_markup_rev: 2 }])).status).toBe(422);
+  });
+
   it('pages can swap idx', async () => {
     const a = fixtureSyncPage(pages[0]!, 1);
     const b = fixtureSyncPage(pages[1]!, 1);

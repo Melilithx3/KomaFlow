@@ -6,6 +6,8 @@ import { api, blobUrl } from '../lib/api.js';
 import { t } from '../strings.js';
 import { ErrorBox } from '../App.js';
 import { ExportPanel } from '../components/ExportPanel.js';
+import { AiJson } from '../components/AiJson.js';
+import { Icon } from '../components/Icon.js';
 
 type Filter = 'all' | 'unready' | 'flagged' | 'ready';
 
@@ -44,9 +46,24 @@ export function ChapterScreen() {
 
   return (
     <div className="page-pad">
-      <div className="crumbs">
-        <Link to={`/projects/${project.id}`}>{project.title}</Link> / {t.projects.chapter(chapter.number)}
-        {chapter.title ? ` · ${chapter.title}` : ''}
+      <div className="screen-head">
+        <div>
+          <div className="crumbs">
+            <Link to={`/projects/${project.id}`}>{project.title}</Link>
+            <Icon name="chevron" size={14} />
+          </div>
+          <h1>
+            {t.projects.chapter(chapter.number)}
+            {chapter.title ? <span className="muted"> · {chapter.title}</span> : null}
+          </h1>
+        </div>
+        <AiJson
+          pageIds={pages.map((p) => p.id)}
+          chapterNumber={chapter.number}
+          sourceLang={project.source_lang}
+          targetLang={project.target_lang}
+          fileName={`komaflow-${chapter.number}.json`}
+        />
       </div>
       <ExportPanel chapterId={chapter.id} pageIdx={idxMap} />
       <div className="row wrap filters" role="group" aria-label="Фильтр">
@@ -70,7 +87,12 @@ export function ChapterScreen() {
                   {p.typed && <span className="badge typed">✓ {t.chapter.typed}</span>}
                 </div>
                 <div className="page-card-body">
-                  <strong>{t.chapter.page(p.idx)}</strong>
+                  <div className="row between">
+                    <strong>{t.chapter.page(p.idx)}</strong>
+                    <span className="mini-progress" aria-hidden>
+                      <span style={{ width: `${p.counts.total ? (100 * (p.counts.total - p.counts.empty)) / p.counts.total : 100}%` }} />
+                    </span>
+                  </div>
                   <div className="badges">
                     <span className={`badge ${p.has_clean ? 'ok' : 'warn'}`}>{p.has_clean ? t.chapter.hasClean : t.chapter.noClean}</span>
                     <span className={`badge ${p.translation_done ? 'ok' : ''}`}>{t.chapter.translation(p.counts.total - p.counts.empty, p.counts.total)}</span>

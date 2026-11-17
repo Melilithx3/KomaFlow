@@ -58,6 +58,7 @@ export interface ObjectRow {
   tw: number | null;
   th: number | null;
   ord: number;
+  rot: number;
   deleted: number;
   geometry_ver: number;
   source_text: string;
@@ -122,6 +123,7 @@ export const objectDTO = (r: ObjectRow): ObjectDTO => ({
   type: r.type,
   box: objBox(r),
   text_box: objTextBox(r),
+  rotation: r.rot,
   geometry_ver: r.geometry_ver,
   source_text: r.source_text,
   translation: r.translation,
