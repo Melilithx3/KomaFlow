@@ -16,7 +16,10 @@ export const tauriHost: Host = {
   readText: (rel) => invoke<string | null>('ws_read_text', { rel }),
   writeTextAtomic: (rel, text) => invoke<void>('ws_write_text', { rel, text }),
   listWorkspaces: () => invoke<string[]>('ws_list'),
-  saveImage: (workspaceId, hash, bytes, mime) => invoke<string>('ws_save_image', { workspaceId, hash, mime, bytes: Array.from(bytes) }),
+  // raw binary bodies: no JSON number arrays for megabytes of PNG
+  saveImage: (workspaceId, hash, bytes, mime) => invoke<string>('ws_save_image', bytes, { headers: { 'x-workspace': workspaceId, 'x-hash': hash, 'x-mime': mime } }),
+  readFile: async (path) => new Uint8Array(await invoke<ArrayBuffer>('read_file', { path })),
+  writeTemp: (workspaceId, name, bytes) => invoke<string>('ws_write_temp', bytes, { headers: { 'x-workspace': workspaceId, 'x-name': name } }),
   uploadBlob(baseUrl, token, file, onProgress) {
     const ch = new Channel<UploadProgress>();
     ch.onmessage = onProgress;

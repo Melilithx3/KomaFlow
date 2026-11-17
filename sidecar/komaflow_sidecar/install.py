@@ -130,13 +130,26 @@ def install_model(key: str, backend: str, log: Log = print) -> None:
     (dest / ".komaflow_model.json").write_text(json.dumps({"repo": m.repo, "revision": m.revision}), encoding="utf-8")
 
 
-def install(backends: list[str], models: list[str], log: Log = print) -> None:
-    for b in backends:
-        install_env(b, log)
+def installed_backend() -> str | None:
+    """An already built environment to download models with (ROCm preferred)."""
+    for b in ("rocm", "cpu"):
+        if paths.env_python(ENVS[b].name).exists():
+            return b
+    return None
+
+
+def install(backends: list[str], models: list[str], log: Log = print, models_only: bool = False) -> None:
+    """Builds environments (unless `models_only`) and downloads models by pinned revision."""
+    if not models_only:
+        for b in backends:
+            install_env(b, log)
+    via = installed_backend() if models_only else (backends[0] if backends else installed_backend())
+    if models and via is None:
+        raise RuntimeError("no engine environment yet: run install without --models-only first")
     for k in models:
-        install_model(k, backends[0], log)
+        install_model(k, via, log)  # type: ignore[arg-type]
     log("done")
 
 
 if __name__ == "__main__":  # pragma: no cover
-    install(sys.argv[1:] or ["rocm", "cpu"], ["layout", "ocr"])
+    install(sys.argv[1:] or ["rocm", "cpu"], ["layout", "ocr", "lama"])

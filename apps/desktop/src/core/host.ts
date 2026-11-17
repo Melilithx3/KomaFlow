@@ -36,6 +36,10 @@ export interface Host {
   listWorkspaces(): Promise<string[]>;
   /** Saves downloaded bytes into the workspace images/ cache; returns the path. */
   saveImage(workspaceId: string, hash: string, bytes: Uint8Array, mime: string): Promise<string>;
+  /** Reads a local file (page images, LaMa results). */
+  readFile(path: string): Promise<Uint8Array>;
+  /** Writes a scratch file under the workspace tmp/ folder (input for the sidecar); returns its absolute path. */
+  writeTemp(workspaceId: string, name: string, bytes: Uint8Array): Promise<string>;
 
   /** Streams a local file to PUT /blobs/{hash} with progress. */
   uploadBlob(baseUrl: string, token: string, file: { path: string; hash: string; mime: string }, onProgress: (p: UploadProgress) => void): Promise<void>;

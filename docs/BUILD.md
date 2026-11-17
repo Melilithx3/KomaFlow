@@ -93,9 +93,9 @@ pip install uv                                   # или установщик �
 cd sidecar
 python -m venv .venv
 .venv\Scripts\python -m pip install -e .
-.venv\Scripts\komaflow-sidecar install --backends rocm,cpu --models layout,ocr
+.venv\Scripts\komaflow-sidecar install --backends rocm,cpu --models layout,ocr,lama
 ```
-Установка скачивает около 8 ГБ: изолированный Python 3.12 через uv, PyTorch ROCm с точными версиями из `sidecar/locks/`, веса моделей по зафиксированным ревизиям. Глобальный Python не меняется. Всё ставится в `%LOCALAPPDATA%\komaflow\sidecar`, лог — в `...\sidecar\logs`.
+Установка скачивает около 8 ГБ (модели разметки, OCR и LaMa для автоклина): изолированный Python 3.12 через uv, PyTorch ROCm с точными версиями из `sidecar/locks/`, веса моделей по зафиксированным ревизиям. Глобальный Python не меняется. Всё ставится в `%LOCALAPPDATA%\komaflow\sidecar`, лог — в `...\sidecar\logs`.
 
 Проверка без десктопа (спайк S2), подробности — в `docs/spikes/S2-report.md`:
 ```powershell

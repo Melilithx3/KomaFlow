@@ -196,8 +196,28 @@ fn ws_list() -> CmdResult<Vec<String>> {
         .collect())
 }
 
+fn header(req: &tauri::ipc::Request<'_>, name: &str) -> CmdResult<String> {
+    req.headers()
+        .get(name)
+        .and_then(|v| v.to_str().ok())
+        .map(|v| v.to_string())
+        .ok_or_else(|| format!("missing header {name}"))
+}
+
+fn raw_body<'a>(req: &'a tauri::ipc::Request<'_>) -> CmdResult<&'a [u8]> {
+    match req.body() {
+        tauri::ipc::InvokeBody::Raw(b) => Ok(b.as_slice()),
+        _ => Err("expected a binary body".into()),
+    }
+}
+
+/// Content-addressed image in workspaces/<id>/images/<sha256>.<ext> (downloads, clean results).
 #[tauri::command]
-fn ws_save_image(app: tauri::AppHandle, workspace_id: String, hash: String, mime: String, bytes: Vec<u8>) -> CmdResult<String> {
+fn ws_save_image(app: tauri::AppHandle, request: tauri::ipc::Request<'_>) -> CmdResult<String> {
+    let workspace_id = header(&request, "x-workspace")?;
+    let hash = header(&request, "x-hash")?;
+    let mime = header(&request, "x-mime")?;
+    let bytes = raw_body(&request)?;
     if hash.len() != 64 || !hash.chars().all(|c| c.is_ascii_hexdigit()) {
         return Err("bad hash".into());
     }
@@ -211,15 +231,36 @@ fn ws_save_image(app: tauri::AppHandle, workspace_id: String, hash: String, mime
     allow_dir(&app, &dir);
     let dest = dir.join(format!("{hash}.{ext}"));
     if !dest.exists() {
-        let actual = hex::encode(Sha256::digest(&bytes));
+        let actual = hex::encode(Sha256::digest(bytes));
         if actual != hash {
-            return Err("downloaded file does not match its hash".into());
+            return Err("file does not match its hash".into());
         }
         let tmp = dir.join(format!(".{}.tmp", uuid::Uuid::new_v4()));
-        std::fs::write(&tmp, &bytes).map_err(err)?;
+        std::fs::write(&tmp, bytes).map_err(err)?;
         std::fs::rename(&tmp, &dest).map_err(err)?;
     }
     Ok(dest.to_string_lossy().into_owned())
+}
+
+/// Scratch file for the sidecar (page snapshot, LaMa mask) in workspaces/<id>/tmp/.
+#[tauri::command]
+fn ws_write_temp(request: tauri::ipc::Request<'_>) -> CmdResult<String> {
+    let workspace_id = header(&request, "x-workspace")?;
+    let name = header(&request, "x-name")?;
+    if name.contains('/') || name.contains('\\') || name.contains("..") {
+        return Err("bad file name".into());
+    }
+    let dir = ws_path(&format!("{workspace_id}/tmp"))?;
+    std::fs::create_dir_all(&dir).map_err(err)?;
+    let dest = dir.join(name);
+    std::fs::write(&dest, raw_body(&request)?).map_err(err)?;
+    Ok(dest.to_string_lossy().into_owned())
+}
+
+/// Reads a local file as raw bytes (ArrayBuffer on the JS side).
+#[tauri::command]
+fn read_file(path: String) -> CmdResult<tauri::ipc::Response> {
+    std::fs::read(&path).map(tauri::ipc::Response::new).map_err(|e| format!("{path}: {e}"))
 }
 
 // ------------------------------------------------------------------ commands: network
@@ -351,6 +392,8 @@ pub fn run() {
             ws_write_text,
             ws_list,
             ws_save_image,
+            ws_write_temp,
+            read_file,
             upload_blob,
             token_get,
             token_set,

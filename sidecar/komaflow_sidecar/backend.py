@@ -77,7 +77,7 @@ def capabilities() -> dict:
     def model_state(key: str) -> dict:
         d = paths.model_dir(key)
         marker = d / ".komaflow_model.json"
-        if fake() and key != "lama":
+        if fake():
             return {"installed": True, "revision": "fake"}
         if marker.exists():
             try:

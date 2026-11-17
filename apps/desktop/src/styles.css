@@ -129,3 +129,14 @@ input[type='checkbox'] { accent-color: var(--accent); }
 .layout-settings { display: flex; flex-direction: column; gap: 0.6rem; }
 .layout-settings input[type='number'] { width: 6.5rem; }
 .pre { white-space: pre-wrap; }
+
+/* clean editor (ADR 0015) */
+.clean-stage { display: flex; flex-direction: column; }
+.clean-editor { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.clean-tools { display: flex; flex-wrap: wrap; gap: 0.45rem; align-items: center; padding: 0.35rem 0.55rem; background: var(--panel-2); border-bottom: 1px solid var(--line); }
+.clean-tools input[type='range'] { width: 90px; accent-color: var(--accent); }
+.clean-tools input[type='color'] { width: 2rem; height: 1.6rem; padding: 0; border-radius: 5px; cursor: pointer; }
+.clean-editor .stage { position: relative; flex: 1; min-height: 0; }
+.mono { font-variant-numeric: tabular-nums; min-width: 2.2em; display: inline-block; }
+.seg.mode button { font-weight: 600; }
+.sep { width: 1px; height: 1.4rem; background: var(--line-strong); }

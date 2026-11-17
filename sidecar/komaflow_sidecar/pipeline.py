@@ -192,3 +192,18 @@ def ocr_boxes(image_path: str, boxes: list[dict], options: dict, ctl: Control | 
     """«Перечитать OCR» for single boxes: [{id, box, rotation?}] -> {results: [{id, source_text}]}."""
     r = ocr_batch([{"page_id": "_", "image_path": image_path, "boxes": boxes}], options, ctl)
     return {"results": r["pages"][0]["results"], "backend": r["backend"]}
+
+
+def inpaint_batch(items: list[dict], options: dict, ctl: Control | None = None) -> dict:
+    """Auto-clean with LaMa: items [{id, image_path, mask_path, out_path}] (PNG mask, white = erase).
+    Works on ROCm and CPU (LaMa is light enough for CPU). -> {results: [{id, out_path, masked_px}], backend}"""
+    ctl = ctl or Control()
+    caps = be.capabilities()
+    if not caps["models"]["lama"]["installed"]:
+        raise RuntimeError("LaMa model is not installed: komaflow-sidecar install --models lama")
+    rocm_info = next(b for b in caps["backends"] if b["id"] == "rocm")
+    cpu_ok = next(b for b in caps["backends"] if b["id"] == "cpu")["available"]
+    backend = be.choose(options.get("backend", "auto"), rocm_info, cpu_ok)
+    with tempfile.TemporaryDirectory(prefix="komaflow-inpaint-") as tmp:
+        out = run_stage("inpaint", backend, {"backend": backend, "model_dir": str(paths.model_dir("lama")), "items": items}, ctl, Path(tmp))
+    return {"backend": backend, "results": [{k: r[k] for k in ("id", "out_path", "masked_px")} for r in out["results"]]}

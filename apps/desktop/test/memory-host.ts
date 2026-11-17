@@ -40,6 +40,16 @@ export class MemoryHost implements Host {
     this.files.set(p, bytes);
     return p;
   };
+  readFile = async (path: string) => {
+    const b = this.files.get(path);
+    if (!b) throw new Error(`no file ${path}`);
+    return b;
+  };
+  writeTemp = async (ws: string, name: string, bytes: Uint8Array) => {
+    const p = `ws/${ws}/tmp/${name}`;
+    this.files.set(p, bytes);
+    return p;
+  };
   uploadBlob = async (base: string, token: string, f: { path: string; hash: string; mime: string }) => {
     if (this.failUploads > 0) {
       this.failUploads--;

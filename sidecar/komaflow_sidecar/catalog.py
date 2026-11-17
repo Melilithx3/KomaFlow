@@ -20,8 +20,8 @@ class ModelSpec:
 MODELS: dict[str, ModelSpec] = {
     "layout": ModelSpec("layout", "mayocream/koharu-layout-highres", "68077eb09401a46e548190ff2786bd405113ea8b", 0.19, True),
     "ocr": ModelSpec("ocr", "PaddlePaddle/PaddleOCR-VL-1.6", "132c45f52c0a26ed5a6b2f6bd8e3985794cc27dd", 1.95, True),
-    # Not used in MVP (auto-clean is post-MVP); optional download only.
-    "lama": ModelSpec("lama", "mayocream/lama-manga", "f91c85b26913b3e83f9877867b4c336da3675238", 0.21, False),
+    # Auto-clean in the desktop (ADR 0015).
+    "lama": ModelSpec("lama", "mayocream/lama-manga", "f91c85b26913b3e83f9877867b4c336da3675238", 0.21, True),
 }
 
 AMD_STABLE = "https://stable.repo.amd.com/rocm/whl-next/"

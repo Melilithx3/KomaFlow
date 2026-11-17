@@ -32,6 +32,19 @@ export interface SidecarOptions {
   stages?: Array<'layout' | 'ocr'>;
 }
 
+export interface InpaintResult {
+  backend: string;
+  results: Array<{ id: string; out_path: string; masked_px: number }>;
+}
+
+/** Why LaMa auto-clean is unavailable, or null. Manual clean tools always work. */
+export function lamaBlocker(caps: SidecarCaps | null): string | null {
+  if (!caps) return 'Движок не запущен: автоклин недоступен, ручные инструменты работают.';
+  if (!caps.models.lama.installed) return 'Модель LaMa не загружена: komaflow-sidecar install --models lama';
+  if (!caps.backends.some((b) => b.available)) return 'Нет подходящего бэкенда (ROCm или CPU).';
+  return null;
+}
+
 export interface OcrBatchResult {
   backend: string;
   pages: Array<{ page_id: string; results: Array<{ id: string; source_text: string }> }>;
@@ -64,6 +77,8 @@ export class SidecarClient {
     this.req<{ job_id: string }>('POST', '/jobs', { kind: 'ocr_batch', pages, options }).then((r) => r.job_id);
   ocrBoxes = (image_path: string, boxes: Array<{ id: string; box: Box; rotation?: number }>, options: SidecarOptions) =>
     this.req<{ job_id: string }>('POST', '/jobs', { kind: 'ocr_boxes', image_path, boxes, options }).then((r) => r.job_id);
+  inpaint = (items: Array<{ id: string; image_path: string; mask_path: string; out_path: string }>, options: Pick<SidecarOptions, 'backend'>) =>
+    this.req<{ job_id: string }>('POST', '/jobs', { kind: 'inpaint', items, options }).then((r) => r.job_id);
   job = <R>(id: string) => this.req<SidecarJob<R>>('GET', `/jobs/${id}`);
   cancel = (id: string) => this.req<SidecarJob<unknown>>('DELETE', `/jobs/${id}`);
 

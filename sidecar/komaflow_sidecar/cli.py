@@ -76,7 +76,8 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("capabilities")
     ins = sub.add_parser("install")
     ins.add_argument("--backends", default="rocm,cpu")
-    ins.add_argument("--models", default="layout,ocr")
+    ins.add_argument("--models", default="layout,ocr,lama")
+    ins.add_argument("--models-only", action="store_true", help="only download models into the existing environment")
     a = p.parse_args(argv)
 
     if a.cmd == "analyze":
@@ -94,7 +95,7 @@ def main(argv: list[str] | None = None) -> int:
     if a.cmd == "install":
         from .install import install
 
-        install([b for b in a.backends.split(",") if b], [m for m in a.models.split(",") if m])
+        install([b for b in a.backends.split(",") if b], [m for m in a.models.split(",") if m], models_only=a.models_only)
         return 0
     return 1
 

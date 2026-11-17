@@ -73,6 +73,17 @@ export const browserHost: Host = {
     if (!files.has(p)) register(p, bytes);
     return p;
   },
+  async readFile(path) {
+    const f = files.get(path);
+    if (!f) throw new Error(`no file ${path}`);
+    return f.bytes;
+  },
+  async writeTemp(ws, name, bytes) {
+    const p = `${ws}/tmp/${name}`;
+    const url = URL.createObjectURL(new Blob([bytes as BlobPart]));
+    files.set(p, { bytes, url, info: { path: p, name, hash: '', width: 0, height: 0, mime: 'application/octet-stream', size: bytes.length } });
+    return p;
+  },
   async uploadBlob(baseUrl, token, file) {
     const res = await fetch(`${baseUrl}/api/v1/blobs/${file.hash}`, {
       method: 'PUT',

@@ -228,3 +228,44 @@ def test_rotated_crop_is_straightened():
 def test_validate_ocr_batch():
     assert validate_job({"kind": "ocr_batch", "pages": [{"page_id": "p", "image_path": "a", "boxes": [{"id": "1", "box": {"x": 1, "y": 1, "w": 2, "h": 2}, "rotation": 10}]}]}) is None
     assert validate_job({"kind": "ocr_batch", "pages": []})
+
+
+# ------------------------------------------------------------------ inpaint (auto-clean)
+def test_inpaint_batch_paints_only_the_mask(tmp_path):
+    from komaflow_sidecar.pipeline import inpaint_batch
+    from komaflow_sidecar.stages.inpaint import mask_crop
+
+    img = tmp_path / "page.png"
+    Image.new("RGB", (100, 80), (10, 10, 10)).save(img)
+    mask = Image.new("L", (100, 80), 0)
+    for x in range(20, 40):
+        for y in range(10, 30):
+            mask.putpixel((x, y), 255)
+    mpath = tmp_path / "mask.png"
+    mask.save(mpath)
+    out = tmp_path / "out.png"
+    r = inpaint_batch([{"id": "p1", "image_path": str(img), "mask_path": str(mpath), "out_path": str(out)}], {}, Control())
+    assert r["results"] == [{"id": "p1", "out_path": str(out), "masked_px": 400}]
+    res = Image.open(out)
+    assert res.getpixel((25, 15)) == (255, 255, 255)
+    assert res.getpixel((5, 5)) == (10, 10, 10)
+    assert mask_crop((20, 10, 40, 30), 100, 80) == (0, 0, 100, 80)
+    assert mask_crop(None, 10, 10) is None
+
+
+def test_validate_inpaint():
+    assert validate_job({"kind": "inpaint", "items": [{"id": "a", "image_path": "i", "mask_path": "m", "out_path": "o"}]}) is None
+    assert validate_job({"kind": "inpaint", "items": [{"id": "a"}]})
+
+
+def test_models_only_install_needs_an_environment(monkeypatch):
+    from komaflow_sidecar import install as ins
+
+    calls = []
+    monkeypatch.setattr(ins, "install_env", lambda b, log: calls.append(("env", b)))
+    monkeypatch.setattr(ins, "install_model", lambda k, b, log: calls.append(("model", k, b)))
+    with pytest.raises(RuntimeError):
+        ins.install([], ["lama"], log=lambda m: None, models_only=True)
+    monkeypatch.setattr(ins, "installed_backend", lambda: "rocm")
+    ins.install(["rocm"], ["lama"], log=lambda m: None, models_only=True)
+    assert calls == [("model", "lama", "rocm")]

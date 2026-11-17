@@ -21,6 +21,7 @@ import { Store } from '../core/store.js';
 import { autosaver, pageStatus } from '../core/workspace.js';
 import type { AppCtx } from './App.js';
 import { Canvas, type Tool } from './Canvas.js';
+import { CleanEditor, type CleanEditorHandle } from './CleanEditor.js';
 import { ImportDialog, Modal, PublishDialog } from './Dialogs.js';
 import { LayoutSettings } from './LayoutSettings.js';
 import { sidecarOptions } from './session.js';
@@ -34,6 +35,10 @@ export function Editor({ ctx, initial, onClose }: { ctx: AppCtx; initial: Worksp
   const page = ws.pages.find((p) => p.id === sel.pageId) ?? ws.pages[0]!;
   const selected = page.objects.find((o) => o.id === sel.objectId) ?? null;
   const [tool, setTool] = useState<Tool>('select');
+  const [mode, setMode] = useState<'markup' | 'clean'>('markup');
+  const cleanRef = useRef<CleanEditorHandle>(null);
+  const modeRef = useRef(mode);
+  modeRef.current = mode;
   const [showClean, setShowClean] = useState(false);
   const [fitSignal, setFitSignal] = useState(0);
   const [dialog, setDialog] = useState<Dialog>(null);
@@ -73,6 +78,24 @@ export function Editor({ ctx, initial, onClose }: { ctx: AppCtx; initial: Worksp
       if (next) store.select({ pageId: next.id });
     },
     [store],
+  );
+  /** Leaving a page or the clean mode saves unsaved clean pixels first. */
+  const saveClean = useCallback(async () => {
+    if (cleanRef.current?.dirty()) await cleanRef.current.save();
+  }, []);
+  const openPage = useCallback(
+    async (id: string) => {
+      await saveClean();
+      store.select({ pageId: id });
+    },
+    [saveClean, store],
+  );
+  const switchPage = useCallback(
+    async (d: -1 | 1) => {
+      await saveClean();
+      goPage(d);
+    },
+    [saveClean, goPage],
   );
 
   /** Step 1: layout only (boxes), so the cleaner can fix overlaps, duplicates and misses before OCR. */
@@ -138,6 +161,13 @@ export function Editor({ ctx, initial, onClose }: { ctx: AppCtx; initial: Worksp
   // keyboard shortcuts (docs/05 §2)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (modeRef.current === 'clean') {
+        if (e.code === 'PageUp' || e.code === 'PageDown') {
+          e.preventDefault();
+          void switchPage(e.code === 'PageUp' ? -1 : 1);
+        }
+        return;
+      }
       const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement;
       const k = e.key;
       if (e.ctrlKey && (k === 'z' || k === 'я') && !typing) return e.preventDefault(), store.undo();
@@ -185,7 +215,7 @@ export function Editor({ ctx, initial, onClose }: { ctx: AppCtx; initial: Worksp
       window.removeEventListener('keydown', onKey);
       window.removeEventListener('keyup', up);
     };
-  }, [store, goPage, saver]);
+  }, [store, goPage, saver, switchPage]);
 
   // order mode: clicks assign 1, 2, 3… in sequence (remaining objects keep their relative order)
   const onOrderClick = (id: string) => {
@@ -221,6 +251,7 @@ export function Editor({ ctx, initial, onClose }: { ctx: AppCtx; initial: Worksp
       <header className="toolbar">
         <button
           onClick={async () => {
+            await saveClean();
             await saver.flush();
             onClose();
           }}
@@ -230,6 +261,16 @@ export function Editor({ ctx, initial, onClose }: { ctx: AppCtx; initial: Worksp
         <strong className="title" title={ws.title}>
           {ws.title}
         </strong>
+        <div className="seg mode" role="group" aria-label="Режим">
+          <button aria-pressed={mode === 'markup'} onClick={async () => (await saveClean(), setMode('markup'))}>
+            Разметка
+          </button>
+          <button aria-pressed={mode === 'clean'} onClick={() => setMode('clean')}>
+            Клин
+          </button>
+        </div>
+        {mode === 'markup' && (
+        <>
         <div className="seg" role="group" aria-label="Инструмент">
           <button aria-pressed={tool === 'select'} onClick={() => setTool('select')} title="Выбор (V)">
             Выбор
@@ -273,16 +314,22 @@ export function Editor({ ctx, initial, onClose }: { ctx: AppCtx; initial: Worksp
           </button>
         </div>
         <span className="sep" />
-        <button onClick={() => setDialog('clean')}>Клин…</button>
+        </>
+        )}
+        <button onClick={() => setDialog('clean')} title="Импорт готового клина из папки">
+          Импорт клина…
+        </button>
         <button onClick={() => setDialog('notes')}>Пометки…</button>
         <span className="spacer" />
-        <label className="check">
-          <input type="checkbox" checked={showClean} disabled={!page.clean} onChange={(e) => setShowClean(e.target.checked)} /> клин
-        </label>
+        {mode === 'markup' && (
+          <label className="check">
+            <input type="checkbox" checked={showClean} disabled={!page.clean} onChange={(e) => setShowClean(e.target.checked)} /> клин
+          </label>
+        )}
         <button onClick={() => setFitSignal((n) => n + 1)} title="Вписать (F)">
           Вписать
         </button>
-        <button className="primary" onClick={() => setDialog('publish')} disabled={!ctx.api.authed} title={ctx.api.authed ? '' : 'Войдите на сервер'}>
+        <button className="primary" onClick={async () => (await saveClean(), setDialog('publish'))} disabled={!ctx.api.authed} title={ctx.api.authed ? '' : 'Войдите на сервер'}>
           Опубликовать
         </button>
       </header>
@@ -310,7 +357,7 @@ export function Editor({ ctx, initial, onClose }: { ctx: AppCtx; initial: Worksp
         {ws.pages.map((p) => {
           const s = pageStatus(p);
           return (
-            <button key={p.id} className={`page-item${p.id === page.id ? ' active' : ''}`} onClick={() => store.select({ pageId: p.id })}>
+            <button key={p.id} className={`page-item${p.id === page.id ? ' active' : ''}`} onClick={() => void openPage(p.id)}>
               <img src={ctx.host.fileUrl((p.thumb ?? p.raw).path)} alt="" loading="lazy" />
               <span className="page-item-row">
                 <b>{p.idx}</b> <span className="muted">{p.objects.length} об.</span>
@@ -327,7 +374,21 @@ export function Editor({ ctx, initial, onClose }: { ctx: AppCtx; initial: Worksp
         })}
       </aside>
 
-      <main className="stage">
+      {mode === 'clean' ? (
+        <main className="stage clean-stage">
+          <CleanEditor
+            ctx={ctx}
+            store={store}
+            page={page}
+            selectedId={sel.objectId}
+            fitSignal={fitSignal}
+            handle={cleanRef}
+            setTask={setTask}
+            setMessage={setMessage}
+          />
+        </main>
+      ) : (
+        <main className="stage">
         <Canvas
           store={store}
           page={page}
@@ -345,6 +406,7 @@ export function Editor({ ctx, initial, onClose }: { ctx: AppCtx; initial: Worksp
         </div>
         <div className="stage-help">Колесо — прокрутка · Shift+колесо — вбок · Ctrl+колесо — масштаб · Q/E — поворот</div>
       </main>
+      )}
 
       <aside className="side">
         <div className="side-head">

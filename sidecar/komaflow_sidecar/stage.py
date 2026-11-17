@@ -28,6 +28,8 @@ def main(argv: list[str]) -> int:
         from .stages import layout as mod
     elif stage == "ocr":
         from .stages import ocr as mod
+    elif stage == "inpaint":
+        from .stages import inpaint as mod
     else:
         raise SystemExit(f"unknown stage {stage}")
     impl = mod.Fake(job) if fake else mod.Real(job)
