@@ -49,7 +49,7 @@ CREATE TABLE objects (
   id TEXT PRIMARY KEY, page_id TEXT NOT NULL REFERENCES pages(id),
   type TEXT NOT NULL CHECK (type IN ('bubble','sfx','onomatopoeia','text')),
   x INTEGER NOT NULL, y INTEGER NOT NULL, w INTEGER NOT NULL, h INTEGER NOT NULL,
-  tx INTEGER, ty INTEGER, tw INTEGER, th INTEGER,    -- text_box, все NULL или все заданы
+  tx INTEGER, ty INTEGER, tw INTEGER, th INTEGER,    -- text_box (под текстовые слои после MVP), все NULL или все заданы
   ord INTEGER NOT NULL,                              -- 1..n среди неудалённых
   deleted INTEGER NOT NULL DEFAULT 0,
   geometry_ver INTEGER NOT NULL DEFAULT 1,
@@ -132,16 +132,21 @@ markup_changed_for_me = есть запись page_seen для (user, page) AND 
 
 ```
 psd_input_hash = sha256(canonicalJson({
-  raw_hash, clean_hash, notes_hash, width, height,
-  psd_settings: project.settings.psd,
+  width, height,
   layers: <флаги слоёв экспорта {raw, clean, notes, text}>,
-  objects: [ {id, type, box, text_box, order, translation, state}
-             для неудалённых объектов по порядку ]
+  raw_hash:   layers.raw   ? raw_hash   : null,
+  clean_hash: layers.clean ? clean_hash : null,
+  notes_hash: layers.notes ? notes_hash : null,
+  psd_settings: layers.text ? project.settings.psd                    // после MVP
+                            : { raw_layer_visible, notes_opacity },   // MVP
+  objects: layers.text ? [ {id, type, box, text_box, order, translation, state}
+                           для неудалённых объектов по порядку ]
+                       : []                                           // MVP: всегда пусто
 }))
 ```
 
 - `canonicalJson`: ключи по алфавиту, без пробелов, только целые числа и строки. Реализуется один раз в `packages/contract` и используется сервером и тестами.
-- Поля, не влияющие на PSD (`comment`, `flagged`, `source_text`), в хэш **не входят**.
+- Поля, не влияющие на PSD (`comment`, `flagged`, `source_text`), в хэш **не входят**. В MVP текста в PSD нет (`layers.text = false`), поэтому правки перевода и разметки экспорт **не устаревают**; он устаревает при замене клина, пометок или raw/notes-настроек.
 - Хэш каждой страницы сохраняется в `manifest.json` экспорта. Страница считается устаревшей, если текущий хэш отличается от сохранённого. Версию генератора храним отдельно в manifest, на актуальность она не влияет.
 
 ## 6. Хранилище файлов

@@ -142,7 +142,7 @@ type SyncResponse = {
 
 | Метод и путь | Назначение |
 |---|---|
-| `POST /chapters/{id}/exports` | `{only_ready?: boolean = true, page_ids?: string[], layers?: {raw?: boolean, clean?: boolean, notes?: boolean, text?: boolean}}` (все слои по умолчанию `true`; в MVP `text: false` → `422`) → `202 {export: ExportDTO}`. Одновременно выполняется одно задание, остальные ждут в очереди |
+| `POST /chapters/{id}/exports` | `{only_ready?: boolean = true, page_ids?: string[], layers?: {raw?: boolean, clean?: boolean, notes?: boolean, text?: boolean}}` (`raw`, `clean`, `notes` по умолчанию `true`, `text` по умолчанию `false`; в MVP `text: true` → `422 VALIDATION_ERROR`; хотя бы один из `raw`/`clean`/`notes` должен быть `true`) → `202 {export: ExportDTO}`. Одновременно выполняется одно задание, остальные ждут в очереди |
 | `GET /exports/{id}` | статус, прогресс, `errors`, `manifest` по готовности |
 | `GET /exports/{id}/download` | zip (потоково). `410` если файл уже удалён по сроку |
 | `GET /chapters/{id}/exports` | последние экспорты главы |
@@ -166,7 +166,7 @@ type ExportStatus = {
 };
 ```
 
-Правила отбора страниц и устройство zip — в `docs/04-psd.md`. `stale_reasons` — подсказка для UI; определяет актуальность `psd_input_hash`.
+Правила отбора страниц и устройство zip — в `docs/04-psd.md`. `stale_reasons` — подсказка для UI; актуальность определяет `psd_input_hash`. В MVP возможны только причины `clean`, `notes`, `settings`; `markup` и `translation` появятся вместе с текстовыми слоями.
 
 ## 8. Служебное
 
