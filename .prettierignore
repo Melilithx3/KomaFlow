@@ -1,0 +1,8 @@
+pnpm-lock.yaml
+dist
+coverage
+reference
+docs
+*.md
+apps/desktop/src-tauri
+sidecar

@@ -1,0 +1,19 @@
+{
+  "name": "@komaflow/contract",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./fixtures": "./src/fixtures/index.ts",
+    "./openapi": "./src/openapi.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "openapi": "node --experimental-strip-types scripts/write-openapi.ts"
+  },
+  "dependencies": {
+    "fflate": "^0.8.3",
+    "zod": "^4.6.7"
+  }
+}
