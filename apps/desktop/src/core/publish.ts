@@ -166,6 +166,7 @@ export async function downloadChapter(
         type: o.type,
         box: o.box,
         text_box: o.text_box,
+        rotation: o.rotation ?? 0,
         source_text: o.source_text,
         origin: 'manual',
         touched: false,

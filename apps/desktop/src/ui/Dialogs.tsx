@@ -8,7 +8,7 @@ import type { Store } from '../core/store.js';
 import { fileRef, saveWorkspace } from '../core/workspace.js';
 import type { AppCtx } from './App.js';
 
-function Modal({ title, children, onClose }: { title: string; children: ReactNode; onClose?: () => void }) {
+export function Modal({ title, children, onClose }: { title: string; children: ReactNode; onClose?: () => void }) {
   return (
     <div className="modal-back" role="dialog" aria-modal="true" aria-label={title}>
       <div className="modal">

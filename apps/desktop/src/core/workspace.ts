@@ -39,7 +39,7 @@ export function pageDigest(p: LocalPage): string {
         raw: p.raw.hash,
         clean: p.clean?.hash ?? null,
         notes: p.notes?.hash ?? null,
-        objects: p.objects.map((o) => ({ id: o.id, type: o.type, box: o.box, text_box: o.text_box })),
+        objects: p.objects.map((o) => ({ id: o.id, type: o.type, box: o.box, text_box: o.text_box, rotation: o.rotation ?? 0 })),
       }),
     ),
   );
@@ -64,7 +64,7 @@ export function toSyncPage(p: LocalPage): SyncPage {
     notes_hash: p.notes?.hash ?? null,
     thumb_hash: p.thumb?.hash ?? null,
     base_markup_rev: p.server_markup_rev,
-    objects: p.objects.map((o) => ({ id: o.id, type: o.type, box: o.box, text_box: o.text_box, source_text: o.source_text })),
+    objects: p.objects.map((o) => ({ id: o.id, type: o.type, box: o.box, text_box: o.text_box, rotation: Math.round(o.rotation ?? 0), source_text: o.source_text })),
   };
 }
 

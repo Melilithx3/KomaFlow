@@ -3,7 +3,7 @@
 Real: mayocream/koharu-layout-highres (RF-DETR Seg 2XL) loaded exactly like the benchmark adapter
 (reference/bench/bench/worker/adapters/koharu_layout.py): rfdetr model built from config.json,
 safetensors loaded strict, manual resize/normalize/forward/postprocess, chunked SDPA on ROCm.
-Job: {"backend", "model_dir", "threshold": float|null, "items": [{"id", "image_path"}]}
+Job: {"backend", "model_dir", "threshold": float|null, "class_thresholds": {class: float}, "items": [{"id", "image_path"}]}
 Result per item: {"id", "width", "height", "detections": [{"class", "score", "xyxy"}]}
 """
 from __future__ import annotations
@@ -13,6 +13,16 @@ import json
 from pathlib import Path
 
 from ..catalog import LAYOUT_ATTN_QUERY_CHUNK
+
+
+def class_limit(job: dict, name: str, recommended: float) -> float:
+    """Score threshold for a class: per-class setting, else the global one, else the model's recommendation."""
+    per = (job.get("class_thresholds") or {}).get(name)
+    if per is not None:
+        return float(per)
+    if job.get("threshold") is not None:
+        return float(job["threshold"])
+    return float(recommended)
 
 
 class Real:
@@ -71,11 +81,10 @@ class Real:
                 pred = {"pred_logits": pred[1], "pred_boxes": pred[0]}
             pred = {k: (v.float() if self.torch.is_tensor(v) else v) for k, v in pred.items()}
             r = self.post(pred, target_sizes=self.torch.tensor([[h, w]], device=self.dev.device))[0]
-        thr = self.job.get("threshold")
         dets = []
         for score, label, box in zip(r["scores"].cpu().tolist(), r["labels"].cpu().tolist(), r["boxes"].cpu().tolist()):
             name = self.classes.get(int(label), str(label))
-            limit = float(thr) if thr is not None else float(self.class_thr.get(name, 1.0))
+            limit = class_limit(self.job, name, self.class_thr.get(name, 1.0))
             if score >= limit:
                 dets.append({"class": name, "score": round(float(score), 4), "xyxy": [float(v) for v in box]})
         return {"id": item["id"], "width": int(w), "height": int(h), "detections": dets}
@@ -107,9 +116,7 @@ class Fake:
             {"class": "text", "score": 0.88, "xyxy": [w * 0.1, h * 0.7, w * 0.4, h * 0.8]},
             {"class": "panel", "score": 0.99, "xyxy": [0, 0, w, h / 2]},
         ]
-        thr = self.job.get("threshold")
-        if thr is not None:
-            dets = [d for d in dets if d["score"] >= thr]
+        dets = [d for d in dets if d["score"] >= class_limit(self.job, d["class"], 0.0)]
         return {"id": item["id"], "width": w, "height": h, "detections": dets}
 
     def peak_vram_mb(self):

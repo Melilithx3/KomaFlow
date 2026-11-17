@@ -14,7 +14,11 @@ import {
   SetBox,
   SetSourceText,
   SetType,
+  SetRotation,
+  ApplyOcr,
+  normalizeAngle,
 } from '../src/core/commands.js';
+import { sidecarOptions, loadSettings } from '../src/ui/session.js';
 import { applicable, matchImport, numericSuffix } from '../src/core/importMatch.js';
 import type { Workspace } from '../src/core/model.js';
 import { downloadChapter, planPublish, publish, refreshWebData } from '../src/core/publish.js';
@@ -120,6 +124,42 @@ describe('workspace and store', () => {
   });
 });
 
+describe('rotation, OCR, layout options', () => {
+  it('rotation is normalised, merges per gesture, undoes in one step', async () => {
+    const host = new MemoryHost(() => Promise.reject(new Error('x')));
+    const s = new Store(await makeWs(host));
+    const pid = s.get().ws.pages[0]!.id;
+    const o = newObject('bubble', { x: 10, y: 10, w: 40, h: 20 });
+    s.exec(AddObject(pid, o));
+    for (const d of [5, 10, 200]) s.exec(SetRotation(pid, o.id, d, 'g'));
+    expect(s.get().ws.pages[0]!.objects[0]!.rotation).toBe(-160);
+    expect(normalizeAngle(-180)).toBe(180);
+    s.undo();
+    expect(s.get().ws.pages[0]!.objects[0]!.rotation ?? 0).toBe(0);
+  });
+  it('ApplyOcr fills originals of existing boxes in one undo step', async () => {
+    const host = new MemoryHost(() => Promise.reject(new Error('x')));
+    const s = new Store(await makeWs(host));
+    const pid = s.get().ws.pages[0]!.id;
+    const a = newObject('bubble', { x: 0, y: 0, w: 10, h: 10 });
+    const b = newObject('bubble', { x: 20, y: 0, w: 10, h: 10 }, 'keep');
+    s.exec(AddObject(pid, a));
+    s.exec(AddObject(pid, b));
+    s.exec(ApplyOcr(pid, new Map([[a.id, 'HELLO'], [b.id, 'keep']])));
+    expect(s.get().ws.pages[0]!.objects.map((o) => o.source_text)).toEqual(['HELLO', 'keep']);
+    s.undo();
+    expect(s.get().ws.pages[0]!.objects[0]!.source_text).toBe('');
+  });
+  it('per-class settings become class_map / class_thresholds', () => {
+    const st = loadSettings(new MemoryHost(() => Promise.reject(new Error('x'))));
+    st.layoutClasses = { ...st.layoutClasses, text: { enabled: true, type: 'sfx', threshold: 0.4 }, bubble: { enabled: false, type: 'bubble', threshold: null } };
+    const o = sidecarOptions(st, ['layout']);
+    expect(o.class_map).toEqual({ bubble: null, text: 'sfx', onomatopoeia: 'onomatopoeia', panel: null });
+    expect(o.class_thresholds).toEqual({ text: 0.4 });
+    expect(o.stages).toEqual(['layout']);
+  });
+});
+
 describe('import matching', () => {
   it('by name, then numeric suffix; size mismatch is not applied; extras listed', async () => {
     const host = new MemoryHost(() => Promise.reject(new Error('x')));
@@ -196,10 +236,12 @@ describe('publish / download against the real server', () => {
 
     const page = s.get().ws.pages[0]!;
     s.exec(SetBox(page.id, page.objects[0]!.id, { x: 1, y: 1, w: 30, h: 30 }));
+    s.exec(SetRotation(page.id, page.objects[0]!.id, 12));
     expect(pageStatus(s.get().ws.pages[0]!).changedSincePublish).toBe(true);
     expect(planPublish(s.get().ws).changedPages).toHaveLength(1);
     const r2 = await publish(host, api, s.get().ws);
     expect(r2.kind === 'ok' && r2.pages).toEqual([expect.objectContaining({ id: page.id, markup_rev: 2, changed: true })]);
+    expect((await api.page(page.id)).objects[0]!.rotation).toBe(12);
   });
 
   it('BLOBS_MISSING after check (file removed on server) is uploaded and retried', async () => {

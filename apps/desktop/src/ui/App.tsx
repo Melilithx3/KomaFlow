@@ -15,6 +15,7 @@ export interface AppCtx {
   sidecar: SidecarClient | null;
   caps: SidecarCaps | null;
   user: string | null;
+  setSettings: (s: Settings) => void;
 }
 
 export function App({ host }: { host: Host }) {
@@ -67,7 +68,7 @@ export function App({ host }: { host: Host }) {
   }, []);
 
   if (!api) return <div className="center">Загрузка…</div>;
-  const ctx: AppCtx = { host, api, settings, sidecar, caps, user };
+  const ctx: AppCtx = { host, api, settings, sidecar, caps, user, setSettings: updateSettings };
 
   if (ws) return <Editor ctx={ctx} initial={ws} onClose={() => setWs(null)} />;
   return (

@@ -14,6 +14,8 @@ export interface LocalObject {
   type: ObjectType;
   box: Box;
   text_box: Box | null;
+  /** Degrees around the box centre, clockwise (ADR 0011). Missing in old workspaces = 0. */
+  rotation?: number;
   source_text: string;
   /** 'auto' — from analysis; 'manual' — drawn by hand (docs/05 §3). */
   origin: 'auto' | 'manual';

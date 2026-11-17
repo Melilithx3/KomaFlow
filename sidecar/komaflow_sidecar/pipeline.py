@@ -13,7 +13,7 @@ from typing import Callable
 from . import backend as be
 from . import paths
 from .catalog import DEFAULTS
-from .geometry import crop_rect, map_class, xyxy_to_box
+from .geometry import crop_object, map_class, xyxy_to_box
 
 
 class Cancelled(Exception):
@@ -103,6 +103,7 @@ def analyze_batch(pages: list[dict], options: dict, ctl: Control | None = None) 
             "layout",
             backend,
             {"backend": backend, "model_dir": str(paths.model_dir("layout")), "threshold": options.get("layout_threshold"),
+             "class_thresholds": options.get("class_thresholds") or {},
              "items": [{"id": p["page_id"], "image_path": p["image_path"]} for p in pages]},
             ctl,
             work,
@@ -125,7 +126,7 @@ def analyze_batch(pages: list[dict], options: dict, ctl: Control | None = None) 
                     im = im.convert("RGB")
                     for o in objs:
                         path = work / f"crop-{len(crops)}.png"
-                        im.crop(crop_rect(o["box"], padding, r["width"], r["height"])).save(path)
+                        crop_object(im, o["box"], 0, padding).save(path)
                         crops.append({"id": o["_key"], "image_path": str(path)})
         ocr_info = None
         if crops:
@@ -151,8 +152,10 @@ def analyze_batch(pages: list[dict], options: dict, ctl: Control | None = None) 
     }
 
 
-def ocr_boxes(image_path: str, boxes: list[dict], options: dict, ctl: Control | None = None) -> dict:
-    """«Перечитать OCR» for single boxes: [{id, box}] -> {results: [{id, source_text}]}."""
+def ocr_batch(pages: list[dict], options: dict, ctl: Control | None = None) -> dict:
+    """OCR of boxes that already exist (after the cleaner fixed the layout): one OCR process for all
+    pages. pages: [{page_id, image_path, boxes: [{id, box, rotation?}]}] ->
+    {pages: [{page_id, results: [{id, source_text}]}], backend}."""
     from PIL import Image
 
     ctl = ctl or Control()
@@ -164,12 +167,28 @@ def ocr_boxes(image_path: str, boxes: list[dict], options: dict, ctl: Control | 
     padding = int(options.get("ocr_padding_px", DEFAULTS["ocr_padding_px"]))
     with tempfile.TemporaryDirectory(prefix="komaflow-ocr-") as tmp:
         work = Path(tmp)
-        items = []
-        with Image.open(image_path) as im:
-            im = im.convert("RGB")
-            for b in boxes:
-                p = work / f"crop-{len(items)}.png"
-                im.crop(crop_rect(b["box"], padding, im.width, im.height)).save(p)
-                items.append({"id": b["id"], "image_path": str(p)})
-        out = run_stage("ocr", backend, {"backend": backend, "model_dir": str(paths.model_dir("ocr")), "items": items}, ctl, work)
-    return {"results": [{"id": r["id"], "source_text": r["text"]} for r in out["results"]], "backend": backend}
+        items: list[dict] = []
+        owner: dict[str, str] = {}
+        for p in pages:
+            ctl.check()
+            if not p["boxes"]:
+                continue
+            with Image.open(p["image_path"]) as im:
+                im = im.convert("RGB")
+                for b in p["boxes"]:
+                    path = work / f"crop-{len(items)}.png"
+                    crop_object(im, b["box"], float(b.get("rotation") or 0), padding).save(path)
+                    key = f"{p['page_id']}:{b['id']}"
+                    owner[key] = p["page_id"]
+                    items.append({"id": key, "image_path": str(path)})
+        out = run_stage("ocr", backend, {"backend": backend, "model_dir": str(paths.model_dir("ocr")), "items": items}, ctl, work) if items else {"results": []}
+    by_page: dict[str, list[dict]] = {p["page_id"]: [] for p in pages}
+    for r in out["results"]:
+        by_page[owner[r["id"]]].append({"id": r["id"].split(":", 1)[1], "source_text": r["text"]})
+    return {"backend": backend, "pages": [{"page_id": k, "results": v} for k, v in by_page.items()]}
+
+
+def ocr_boxes(image_path: str, boxes: list[dict], options: dict, ctl: Control | None = None) -> dict:
+    """«Перечитать OCR» for single boxes: [{id, box, rotation?}] -> {results: [{id, source_text}]}."""
+    r = ocr_batch([{"page_id": "_", "image_path": image_path, "boxes": boxes}], options, ctl)
+    return {"results": r["pages"][0]["results"], "backend": r["backend"]}

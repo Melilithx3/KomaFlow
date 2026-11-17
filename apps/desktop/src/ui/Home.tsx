@@ -6,6 +6,7 @@ import { analysisBlocker } from '../core/sidecar.js';
 import { loadWorkspace, saveWorkspace, workspaceFromImages } from '../core/workspace.js';
 import type { AppCtx } from './App.js';
 import type { Settings } from './session.js';
+import { LayoutSettings } from './LayoutSettings.js';
 
 interface Props {
   ctx: AppCtx;
@@ -102,23 +103,9 @@ export function Home({ ctx, onSettings, onLogin, onLogout, onOpen, onOpenSaved }
               <option value="cpu">CPU</option>
             </select>
           </label>
-          <label>
-            Отступ кропа OCR, px{' '}
-            <input type="number" min={0} max={64} value={settings.ocrPaddingPx} onChange={(e) => onSettings({ ...settings, ocrPaddingPx: Number(e.target.value) })} />
-          </label>
-          <label>
-            Порог детекции{' '}
-            <input
-              type="number"
-              min={0}
-              max={1}
-              step={0.05}
-              placeholder="по модели"
-              value={settings.layoutThreshold ?? ''}
-              onChange={(e) => onSettings({ ...settings, layoutThreshold: e.target.value === '' ? null : Number(e.target.value) })}
-            />
-          </label>
         </div>
+        <h3>Параметры разметки</h3>
+        <LayoutSettings settings={settings} onChange={onSettings} />
         <p className="muted small">Установка движка: `komaflow-sidecar install` (см. sidecar/README.md). Без него боксы рисуются вручную.</p>
       </section>
       {host.kind === 'browser' && <p className="muted small">Режим разработки в браузере: файлы держатся в памяти вкладки.</p>}

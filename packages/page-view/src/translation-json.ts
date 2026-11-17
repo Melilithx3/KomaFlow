@@ -88,7 +88,7 @@ export function parseTranslationJson(text: string, pages: ExportPage[]): ImportR
   try {
     raw = JSON.parse(unwrap(text));
   } catch (e) {
-    throw new Error(`Это не JSON: ${e instanceof Error ? e.message : String(e)}`);
+    throw new Error(`Это не JSON: ${e instanceof Error ? e.message : String(e)}`, { cause: e });
   }
   const parsed = FileSchema.safeParse(raw);
   if (!parsed.success) throw new Error('JSON не похож на файл перевода komaflow (нет списка pages/objects)');

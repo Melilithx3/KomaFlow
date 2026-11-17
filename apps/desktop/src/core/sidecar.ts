@@ -25,6 +25,16 @@ export interface SidecarOptions {
   backend: 'auto' | 'rocm' | 'cpu';
   ocr_padding_px: number;
   layout_threshold: number | null;
+  /** model class → our type, or null to drop the class */
+  class_map?: Record<string, ObjectType | null>;
+  /** model class → score threshold (missing = model's recommendation) */
+  class_thresholds?: Record<string, number>;
+  stages?: Array<'layout' | 'ocr'>;
+}
+
+export interface OcrBatchResult {
+  backend: string;
+  pages: Array<{ page_id: string; results: Array<{ id: string; source_text: string }> }>;
 }
 
 /** Client of the local Python service (docs/05 §9). */
@@ -50,7 +60,9 @@ export class SidecarClient {
   capabilities = () => this.req<SidecarCaps>('GET', '/capabilities');
   analyze = (pages: Array<{ page_id: string; image_path: string }>, options: SidecarOptions) =>
     this.req<{ job_id: string }>('POST', '/jobs', { kind: 'analyze_batch', pages, options }).then((r) => r.job_id);
-  ocrBoxes = (image_path: string, boxes: Array<{ id: string; box: Box }>, options: SidecarOptions) =>
+  ocrBatch = (pages: Array<{ page_id: string; image_path: string; boxes: Array<{ id: string; box: Box; rotation: number }> }>, options: SidecarOptions) =>
+    this.req<{ job_id: string }>('POST', '/jobs', { kind: 'ocr_batch', pages, options }).then((r) => r.job_id);
+  ocrBoxes = (image_path: string, boxes: Array<{ id: string; box: Box; rotation?: number }>, options: SidecarOptions) =>
     this.req<{ job_id: string }>('POST', '/jobs', { kind: 'ocr_boxes', image_path, boxes, options }).then((r) => r.job_id);
   job = <R>(id: string) => this.req<SidecarJob<R>>('GET', `/jobs/${id}`);
   cancel = (id: string) => this.req<SidecarJob<unknown>>('DELETE', `/jobs/${id}`);

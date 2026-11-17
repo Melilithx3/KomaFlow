@@ -96,6 +96,40 @@ export const SetBox = (pageId: string, objectId: string, box: Box, gesture?: str
     gesture ? `box:${objectId}:${gesture}` : undefined,
   );
 
+/** Rotation in whole degrees, normalised to -180..180. Same `gesture` → one undo entry. */
+export const normalizeAngle = (deg: number) => {
+  let a = Math.round(deg) % 360;
+  if (a > 180) a -= 360;
+  if (a < -180) a += 360;
+  return a === -180 ? 180 : a;
+};
+
+export const SetRotation = (pageId: string, objectId: string, deg: number, gesture?: string) =>
+  pageObjectsCommand(
+    'Поворот бокса',
+    pageId,
+    (p) => {
+      const o = p.objects.find((x) => x.id === objectId);
+      const r = normalizeAngle(deg);
+      if (!o || (o.rotation ?? 0) === r) return null;
+      return p.objects.map((x) => (x.id === objectId ? touch({ ...x, rotation: r }) : x));
+    },
+    gesture ? `rot:${objectId}:${gesture}` : undefined,
+  );
+
+/** Applies OCR results to existing boxes (separate OCR run, docs: layout first, then OCR). One undo entry. */
+export const ApplyOcr = (pageId: string, texts: ReadonlyMap<string, string>) =>
+  pageObjectsCommand('OCR', pageId, (p) => {
+    let changed = false;
+    const objects = p.objects.map((o) => {
+      const t = texts.get(o.id);
+      if (t === undefined || t === o.source_text) return o;
+      changed = true;
+      return { ...o, source_text: t };
+    });
+    return changed ? objects : null;
+  });
+
 export const SetType = (pageId: string, objectId: string, type: ObjectType) =>
   pageObjectsCommand('Тип объекта', pageId, (p) => {
     const o = p.objects.find((x) => x.id === objectId);

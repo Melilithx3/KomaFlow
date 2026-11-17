@@ -2,7 +2,7 @@
 
   GET  /health        -> {ok, version}
   GET  /capabilities  -> {backends, models}
-  POST /jobs          -> {job_id}      body: {kind: analyze_batch|ocr_boxes, ...}
+  POST /jobs          -> {job_id}      body: {kind: analyze_batch|ocr_batch|ocr_boxes, ...}
   GET  /jobs/{id}     -> {state, stage, progress, result?, error?}
   DELETE /jobs/{id}   -> cancel
 
@@ -20,7 +20,7 @@ from typing import Any
 from . import __version__
 from . import backend as be
 from .jobs import JobQueue
-from .pipeline import analyze_batch, ocr_boxes
+from .pipeline import analyze_batch, ocr_batch, ocr_boxes
 
 MAX_BODY = 4 * 1024 * 1024
 
@@ -42,20 +42,39 @@ def validate_job(body: Any) -> str | None:
             if not isinstance(p, dict) or not isinstance(p.get("page_id"), str) or not isinstance(p.get("image_path"), str):
                 return "each page needs page_id and image_path"
         return None
+    if kind == "ocr_batch":
+        pages = body.get("pages")
+        if not isinstance(pages, list) or not pages:
+            return "pages must be a non-empty list"
+        for p in pages:
+            if not isinstance(p, dict) or not isinstance(p.get("page_id"), str) or not isinstance(p.get("image_path"), str):
+                return "each page needs page_id and image_path"
+            err = _check_boxes(p.get("boxes"))
+            if err:
+                return err
+        return None
     if kind == "ocr_boxes":
         if not isinstance(body.get("image_path"), str):
             return "image_path is required"
         boxes = body.get("boxes")
         if not isinstance(boxes, list) or not boxes:
             return "boxes must be a non-empty list"
-        for b in boxes:
-            box = b.get("box") if isinstance(b, dict) else None
-            if not isinstance(b, dict) or not isinstance(b.get("id"), str) or not isinstance(box, dict) or not all(
-                isinstance(box.get(k), int) for k in ("x", "y", "w", "h")
-            ):
-                return "each box needs id and integer box {x,y,w,h}"
-        return None
-    return "kind must be analyze_batch or ocr_boxes"
+        return _check_boxes(boxes)
+    return "kind must be analyze_batch, ocr_batch or ocr_boxes"
+
+
+def _check_boxes(boxes: Any) -> str | None:
+    if not isinstance(boxes, list):
+        return "boxes must be a list"
+    for b in boxes:
+        box = b.get("box") if isinstance(b, dict) else None
+        if not isinstance(b, dict) or not isinstance(b.get("id"), str) or not isinstance(box, dict) or not all(
+            isinstance(box.get(k), int) for k in ("x", "y", "w", "h")
+        ):
+            return "each box needs id and integer box {x,y,w,h}"
+        if not isinstance(b.get("rotation", 0), (int, float)):
+            return "rotation must be a number"
+    return None
 
 
 def make_handler(token: str, jobs: JobQueue):
@@ -121,6 +140,8 @@ def make_handler(token: str, jobs: JobQueue):
             opts = body.get("options", {})
             if body["kind"] == "analyze_batch":
                 job = jobs.submit("analyze_batch", lambda ctl: analyze_batch(body["pages"], opts, ctl))
+            elif body["kind"] == "ocr_batch":
+                job = jobs.submit("ocr_batch", lambda ctl: ocr_batch(body["pages"], opts, ctl))
             else:
                 job = jobs.submit("ocr_boxes", lambda ctl: ocr_boxes(body["image_path"], body["boxes"], opts, ctl))
             self._send(202, {"job_id": job.id})

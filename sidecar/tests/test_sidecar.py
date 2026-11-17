@@ -192,3 +192,39 @@ def test_cli_analyze_with_overlay(pages, tmp_path):
     data = json.loads((out / "analysis.json").read_text(encoding="utf-8"))
     assert len(data["pages"]) == 2
     assert (out / "001.overlay.png").exists()
+
+
+# ------------------------------------------------------------------ layout params, separate OCR, rotation
+def test_per_class_thresholds_and_map(pages):
+    res = analyze_batch(pages, {"stages": ["layout"], "class_thresholds": {"bubble": 0.95, "text": 0.5},
+                                "class_map": {"bubble": "bubble", "text": "onomatopoeia", "panel": "text"}}, Control())
+    assert [o["type"] for o in res["pages"][0]["objects"]] == ["onomatopoeia", "text"]  # bubble cut, panel enabled
+
+
+def test_ocr_batch_over_existing_boxes(pages):
+    from komaflow_sidecar.pipeline import ocr_batch
+
+    r = ocr_batch([{**pages[0], "boxes": [{"id": "a", "box": {"x": 10, "y": 10, "w": 100, "h": 40}},
+                                          {"id": "b", "box": {"x": 200, "y": 200, "w": 60, "h": 120}, "rotation": 90}]},
+                   {**pages[1], "boxes": []}], {"ocr_padding_px": 0}, Control())
+    assert r["pages"][0]["results"] == [{"id": "a", "source_text": "テキスト 100x40"}, {"id": "b", "source_text": "テキスト 60x120"}]
+    assert r["pages"][1]["results"] == []
+
+
+def test_rotated_crop_is_straightened():
+    from komaflow_sidecar.geometry import crop_object
+
+    im = Image.new("RGB", (200, 200), (255, 255, 255))
+    # a vertical dark bar on the page = a horizontal line of text rotated by 90 degrees
+    for y in range(50, 150):
+        for x in range(95, 105):
+            im.putpixel((x, y), (0, 0, 0))
+    c = crop_object(im, {"x": 50, "y": 95, "w": 100, "h": 10}, 90, 0)
+    assert c.size == (100, 10)
+    dark = sum(1 for x in range(100) for y in range(10) if c.getpixel((x, y))[0] < 128)
+    assert dark > 800
+
+
+def test_validate_ocr_batch():
+    assert validate_job({"kind": "ocr_batch", "pages": [{"page_id": "p", "image_path": "a", "boxes": [{"id": "1", "box": {"x": 1, "y": 1, "w": 2, "h": 2}, "rotation": 10}]}]}) is None
+    assert validate_job({"kind": "ocr_batch", "pages": []})

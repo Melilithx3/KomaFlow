@@ -59,3 +59,19 @@ def clean_ocr_text(text: str) -> str:
     while lines and not lines[-1]:
         lines.pop()
     return "\n".join(lines)
+
+
+def crop_object(im, box: dict[str, int], rotation: float, padding: int):
+    """Crop for OCR. A rotated box is straightened first: the page is rotated around the box centre
+    (PIL rotates counter-clockwise for positive angles, our rotation is clockwise on screen), so the
+    text lies horizontally; then the box with padding is cut out."""
+    from PIL import Image
+
+    w, h = im.size
+    if not rotation:
+        return im.crop(crop_rect(box, padding, w, h))
+    cx = box["x"] + box["w"] / 2
+    cy = box["y"] + box["h"] / 2
+    upright = im.rotate(rotation, resample=Image.Resampling.BICUBIC, center=(cx, cy), fillcolor=(255, 255, 255))
+    p = max(0, int(padding))
+    return upright.crop((round(cx - box["w"] / 2 - p), round(cy - box["h"] / 2 - p), round(cx + box["w"] / 2 + p), round(cy + box["h"] / 2 + p)))
