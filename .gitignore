@@ -30,3 +30,5 @@ reference/bench/test_data/*
 !reference/bench/test_data/*.txt
 .DS_Store
 Thumbs.db
+*.egg-info/
+tools/spikes/s1-psd/out/
