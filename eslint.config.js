@@ -22,4 +22,12 @@ export default tseslint.config(
       '@typescript-eslint/consistent-type-imports': 'error',
     },
   },
+  {
+    files: ['**/*.mjs'],
+    languageOptions: {
+      globals: Object.fromEntries(
+        ['process', 'console', 'Buffer', 'fetch', 'performance', 'setTimeout', 'setInterval', 'clearInterval', 'URL'].map((g) => [g, 'readonly']),
+      ),
+    },
+  },
 );
