@@ -1,0 +1,13 @@
+[Unit]
+Description=komaflow nightly backup (SQLite copy + text dump)
+
+[Service]
+Type=oneshot
+User=komaflow
+Group=komaflow
+WorkingDirectory=/opt/komaflow
+EnvironmentFile=/etc/komaflow/komaflow.env
+ExecStart=/usr/bin/node apps/server/dist/admin.js backup
+ExecStart=/bin/sh -c '/usr/bin/node apps/server/dist/admin.js dump-text --out /var/lib/komaflow/backups/text-$(date +%%Y%%m%%d).json && find /var/lib/komaflow/backups -name "text-*.json" -mtime +7 -delete'
+ProtectSystem=strict
+ReadWritePaths=/var/lib/komaflow

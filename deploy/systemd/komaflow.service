@@ -1,0 +1,26 @@
+[Unit]
+Description=komaflow server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=komaflow
+Group=komaflow
+WorkingDirectory=/opt/komaflow
+EnvironmentFile=/etc/komaflow/komaflow.env
+ExecStart=/usr/bin/node --max-old-space-size=512 apps/server/dist/server.js
+Restart=always
+RestartSec=3
+# hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/komaflow
+# logs go to journald (limit size in /etc/systemd/journald.conf: SystemMaxUse=100M)
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

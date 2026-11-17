@@ -67,3 +67,7 @@
 | `pnpm --filter @komaflow/tools s1` | харнес спайка S1 (PSD в `tools/spikes/s1-psd/out/`) |
 | `bash tools/spikes/s3-arm/run.sh` | харнес спайка S3 (на Orange Pi) |
 | `node apps/server/dist/server.js` | прод-сервер (после `pnpm build`), отдаёт и API, и веб |
+| `pnpm --filter @komaflow/desktop dev` | UI десктопа в браузере (:1420, прокси на :8787) |
+| `pnpm --filter @komaflow/desktop tauri dev` / `tauri build` | десктоп в Tauri / установщик (нужен Rust) |
+| `cd sidecar && .venv/Scripts/python -m pytest` | тесты сайдкара (заглушки моделей) |
+| `komaflow-sidecar install` / `analyze --pages … --out … --overlay` / `serve --token …` | движок анализа |
