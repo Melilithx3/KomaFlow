@@ -201,7 +201,7 @@ export const ApplyAnalysis = (pageId: string, detected: DetectedObject[], dir: R
 export const replacedByAnalysis = (p: LocalPage) => p.objects.filter((o) => o.origin === 'auto' && !o.touched).length;
 
 /** ImportClean / ImportNotes: binds files to pages (one undo entry for the whole import). */
-export function ImportFiles(kind: 'clean' | 'notes', files: Array<{ pageId: string; file: FileRef }>): Command {
+export function ImportFiles(kind: 'clean' | 'notes', files: Array<{ pageId: string; file: FileRef | null }>): Command {
   let before: Map<string, FileRef | null> | null = null;
   const label = kind === 'clean' ? 'Импорт клина' : 'Импорт пометок';
   return {
@@ -211,8 +211,9 @@ export function ImportFiles(kind: 'clean' | 'notes', files: Array<{ pageId: stri
       const byPage = new Map(files.map((f) => [f.pageId, f.file]));
       let changed = false;
       const pages = ws.pages.map((p) => {
-        const f = byPage.get(p.id);
-        if (!f || p[kind]?.hash === f.hash) return p;
+        if (!byPage.has(p.id)) return p;
+        const f = byPage.get(p.id) ?? null; // null removes the file (e.g. notes erased to nothing)
+        if ((p[kind]?.hash ?? null) === (f?.hash ?? null)) return p;
         prev.set(p.id, p[kind]);
         changed = true;
         return { ...p, [kind]: f };

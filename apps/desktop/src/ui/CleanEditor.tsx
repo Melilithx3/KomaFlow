@@ -7,11 +7,15 @@ import {
   applyMasked,
   cloneDab,
   cloneRaster,
+  createRaster,
+  eraseDabAlpha,
   floodFill,
+  hasVisiblePixels,
   maskBounds,
   maskDab,
   maskToRaster,
   paintDab,
+  paintDabOver,
   PixelHistory,
   pixelAt,
   readRegion,
@@ -28,7 +32,7 @@ import type { Store } from '../core/store.js';
 import type { AppCtx } from './App.js';
 import { decodeBytes, encodePng } from './cleanIO.js';
 
-export type CleanTool = 'brush' | 'eraser' | 'fill' | 'stamp' | 'mask';
+export type CleanTool = 'brush' | 'eraser' | 'fill' | 'stamp' | 'mask' | 'notes';
 
 export interface CleanEditorHandle {
   /** Saves pending pixels as the page's clean (before switching page or mode). */
@@ -50,8 +54,8 @@ interface Props extends TaskFns {
   handle?: Ref<CleanEditorHandle>;
 }
 
-const TOOL_KEYS: Record<string, CleanTool> = { KeyB: 'brush', KeyE: 'eraser', KeyG: 'fill', KeyS: 'stamp', KeyM: 'mask' };
-const TOOL_RU: Record<CleanTool, string> = { brush: 'Кисть (B)', eraser: 'Ластик → raw (E)', fill: 'Заливка (G)', stamp: 'Штамп (S, Alt+щелчок — источник)', mask: 'Маска LaMa (M, Shift — стереть)' };
+const TOOL_KEYS: Record<string, CleanTool> = { KeyB: 'brush', KeyE: 'eraser', KeyG: 'fill', KeyS: 'stamp', KeyM: 'mask', KeyN: 'notes' };
+const TOOL_RU: Record<CleanTool, string> = { brush: 'Кисть (B)', eraser: 'Ластик → raw (E)', fill: 'Заливка (G)', stamp: 'Штамп (S, Alt+щелчок — источник)', mask: 'Маска LaMa (M, Shift — стереть)', notes: 'Пометка для тайпера (N, Shift — стереть): отдельный слой Notes' };
 
 const hexToRgba = (h: string): RGBA => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16), 255];
 const rgbaToHex = (c: RGBA) => `#${c.slice(0, 3).map((v) => v.toString(16).padStart(2, '0')).join('')}`;
@@ -81,13 +85,22 @@ export function CleanEditor(p: Props) {
   const raw = useRef<Raster | null>(null);
   const mask = useRef<Uint8Array | null>(null);
   const workCanvas = useRef<OffscreenCanvas | null>(null);
+  /** Notes for the typer: a transparent layer over the clean, published as the page's notes (docs/04 §2). */
+  const notes = useRef<Raster | null>(null);
+  const notesCanvas = useRef<OffscreenCanvas | null>(null);
+  const notesImage = useRef<ImageData | null>(null);
+  const notesHistory = useRef(new PixelHistory());
+  const notesDirty = useRef(false);
+  /** Which layer each undo step belongs to (both layers share Ctrl+Z). */
+  const undoOrder = useRef<Array<'work' | 'notes'>>([]);
+  const redoOrder = useRef<Array<'work' | 'notes'>>([]);
   const maskCanvas = useRef<OffscreenCanvas | null>(null);
   const workImage = useRef<ImageData | null>(null);
   const maskImage = useRef<ImageData | null>(null);
   const history = useRef(new PixelHistory());
   const vp = useRef<Viewport>({ scale: 0.25, x: 0, y: 0 });
   const frame = useRef(0);
-  const stroke = useRef<{ last: [number, number]; origin: Raster; dirty: Rect | null; stampOffset?: [number, number] } | null>(null);
+  const stroke = useRef<{ last: [number, number]; origin: Raster; dirty: Rect | null; stampOffset?: [number, number]; erase?: boolean } | null>(null);
   const pan = useRef<{ sx: number; sy: number; vx: number; vy: number } | null>(null);
   const cursor = useRef<{ x: number; y: number } | null>(null);
   const space = useRef(false);
@@ -101,14 +114,16 @@ export function CleanEditor(p: Props) {
   const [hardness, setHardness] = useState(0.8);
   const [opacity, setOpacity] = useState(1);
   const [color, setColor] = useState('#ffffff');
+  const [notesColor, setNotesColor] = useState('#ff2d2d');
+  const [showNotes, setShowNotes] = useState(true);
   const [tolerance, setTolerance] = useState(24);
   const [showBoxes, setShowBoxes] = useState(true);
   const [loading, setLoading] = useState(true);
   const [mp, setMp] = useState<MaskParams>(loadMaskParams);
   const props = useRef(p);
   props.current = p;
-  const settings = useRef({ tool, size, hardness, opacity, color, tolerance, showBoxes });
-  settings.current = { tool, size, hardness, opacity, color, tolerance, showBoxes };
+  const settings = useRef({ tool, size, hardness, opacity, color, tolerance, showBoxes, notesColor, showNotes });
+  settings.current = { tool, size, hardness, opacity, color, tolerance, showBoxes, notesColor, showNotes };
 
   // ---------------------------------------------------------------- rendering
   const draw = useCallback(() => {
@@ -134,6 +149,7 @@ export function CleanEditor(p: Props) {
       g.scale(v.scale, v.scale);
       g.imageSmoothingEnabled = v.scale < 2;
       if (workCanvas.current) g.drawImage(workCanvas.current, 0, 0);
+      if (notesCanvas.current && settings.current.showNotes) g.drawImage(notesCanvas.current, 0, 0);
       if (maskCanvas.current) g.drawImage(maskCanvas.current, 0, 0);
       if (settings.current.showBoxes) {
         g.lineWidth = 1.2 / v.scale;
@@ -197,6 +213,15 @@ export function CleanEditor(p: Props) {
     [draw],
   );
 
+  const flushNotes = useCallback(
+    (rect: Rect | null) => {
+      if (!rect || !notesImage.current || !notesCanvas.current) return;
+      notesCanvas.current.getContext('2d')!.putImageData(notesImage.current, 0, 0, rect.x, rect.y, rect.w, rect.h);
+      draw();
+    },
+    [draw],
+  );
+
   const fullRect = (): Rect => ({ x: 0, y: 0, w: work.current!.width, h: work.current!.height });
 
   // ---------------------------------------------------------------- loading
@@ -204,14 +229,19 @@ export function CleanEditor(p: Props) {
     let alive = true;
     setLoading(true);
     history.current.clear();
+    notesHistory.current.clear();
+    undoOrder.current = [];
+    redoOrder.current = [];
     dirty.current = false;
+    notesDirty.current = false;
     stampSource.current = null;
     void (async () => {
       const pg = p.page;
       try {
-        const [rw, base] = await Promise.all([
+        const [rw, base, nt] = await Promise.all([
           p.ctx.host.readFile(pg.raw.path).then(decodeBytes),
           pg.clean ? p.ctx.host.readFile(pg.clean.path).then(decodeBytes) : null,
+          pg.notes ? p.ctx.host.readFile(pg.notes.path).then(decodeBytes) : null,
         ]);
         if (!alive) return;
         raw.current = rw;
@@ -222,6 +252,10 @@ export function CleanEditor(p: Props) {
         for (let i = 0; i < rw.width * rw.height; i++) maskImage.current.data[i * 4] = 239; // red overlay
         workCanvas.current = new OffscreenCanvas(rw.width, rw.height);
         maskCanvas.current = new OffscreenCanvas(rw.width, rw.height);
+        notes.current = nt && nt.width === rw.width && nt.height === rw.height ? nt : createRaster(rw.width, rw.height);
+        notesImage.current = new ImageData(notes.current.data as Uint8ClampedArray<ArrayBuffer>, rw.width, rw.height);
+        notesCanvas.current = new OffscreenCanvas(rw.width, rw.height);
+        notesCanvas.current.getContext('2d')!.putImageData(notesImage.current, 0, 0);
         const c = view.current!;
         vp.current = fitViewport(rw, { width: c.clientWidth, height: c.clientHeight });
         flush(fullRect(), true);
@@ -236,29 +270,81 @@ export function CleanEditor(p: Props) {
       alive = false;
     };
     // reload only when the page (or its stored clean) changes
-  }, [p.page.id, p.page.clean?.hash]);
+  }, [p.page.id, p.page.clean?.hash, p.page.notes?.hash]);
 
   useEffect(() => {
     const c = view.current;
     if (c && work.current) vp.current = fitViewport(work.current, { width: c.clientWidth, height: c.clientHeight });
     draw();
   }, [p.fitSignal, draw]);
-  useEffect(draw, [showBoxes, tool, size, p.selectedId, p.page.objects, draw]);
+  useEffect(draw, [showBoxes, showNotes, tool, size, p.selectedId, p.page.objects, draw]);
 
   // ---------------------------------------------------------------- saving
   const save = useCallback(async () => {
     const w = work.current;
-    if (!w || !dirty.current) return;
+    if (!w || (!dirty.current && !notesDirty.current)) return;
     const { ctx, store, page } = props.current;
-    const bytes = await encodePng(w);
-    const hash = sha256Hex(bytes);
-    const path = await ctx.host.saveImage(store.get().ws.id, hash, bytes, 'image/png');
-    store.exec(ImportFiles('clean', [{ pageId: page.id, file: { path, hash, width: w.width, height: w.height, mime: 'image/png' } }]));
-    dirty.current = false;
+    const wsId = store.get().ws.id;
+    const saved: string[] = [];
+    if (dirty.current) {
+      const bytes = await encodePng(w);
+      const hash = sha256Hex(bytes);
+      const path = await ctx.host.saveImage(wsId, hash, bytes, 'image/png');
+      store.exec(ImportFiles('clean', [{ pageId: page.id, file: { path, hash, width: w.width, height: w.height, mime: 'image/png' } }]));
+      dirty.current = false;
+      saved.push('клин');
+    }
+    const n = notes.current;
+    if (notesDirty.current && n) {
+      // only a layer the cleaner actually drew on goes to the server
+      if (hasVisiblePixels(n)) {
+        const bytes = await encodePng(n);
+        const hash = sha256Hex(bytes);
+        const path = await ctx.host.saveImage(wsId, hash, bytes, 'image/png');
+        store.exec(ImportFiles('notes', [{ pageId: page.id, file: { path, hash, width: n.width, height: n.height, mime: 'image/png' } }]));
+        saved.push('пометки');
+      } else if (page.notes) {
+        store.exec(ImportFiles('notes', [{ pageId: page.id, file: null }]));
+        saved.push('пометки удалены');
+      }
+      notesDirty.current = false;
+    }
     rerender();
-    props.current.setMessage(`Клин страницы ${page.idx} сохранён.`);
+    props.current.setMessage(`Страница ${page.idx}: сохранено — ${saved.join(', ')}.`);
   }, []);
-  useImperativeHandle(p.handle, () => ({ save, dirty: () => dirty.current }), [save]);
+  useImperativeHandle(p.handle, () => ({ save, dirty: () => dirty.current || notesDirty.current }), [save]);
+
+  /** Records a finished edit for the shared undo history. */
+  const pushHistory = (layer: 'work' | 'notes', rect: Rect, before: Raster) => {
+    (layer === 'work' ? history : notesHistory).current.push(rect, before);
+    undoOrder.current.push(layer);
+    redoOrder.current = [];
+  };
+  const undoRedo = (redo: boolean) => {
+    const from = redo ? redoOrder : undoOrder;
+    const to = redo ? undoOrder : redoOrder;
+    const layer = from.current.pop();
+    if (!layer) return;
+    const target = layer === 'work' ? work.current : notes.current;
+    if (!target) return;
+    const h = (layer === 'work' ? history : notesHistory).current;
+    const rect = redo ? h.redo(target) : h.undo(target);
+    if (!rect) return;
+    to.current.push(layer);
+    if (layer === 'work') {
+      flush(rect);
+      markDirty();
+    } else {
+      flushNotes(rect);
+      markNotesDirty();
+    }
+  };
+  const markNotesDirty = () => {
+    if (!notesDirty.current) {
+      notesDirty.current = true;
+      rerender();
+    }
+  };
 
   const markDirty = () => {
     if (!dirty.current) {
@@ -314,7 +400,7 @@ export function CleanEditor(p: Props) {
       const j = await sc.wait<InpaintResult>(id, () => {});
       if (j.state !== 'done' || !j.result) return setMessage(j.state === 'failed' ? `LaMa: ${j.error}` : 'LaMa отменён.');
       const result = await decodeBytes(await ctx.host.readFile(j.result.results[0]!.out_path));
-      history.current.begin(w, bounds);
+      pushHistory('work', bounds, readRegion(w, bounds));
       applyMasked(w, result, m);
       m.fill(0);
       flush(fullRect(), true);
@@ -398,6 +484,8 @@ export function CleanEditor(p: Props) {
         return restoreDab(w, raw.current!, x, y, brush());
       case 'stamp':
         return s.stampOffset ? cloneDab(w, s.origin, x, y, s.stampOffset[0], s.stampOffset[1], brush()) : null;
+      case 'notes':
+        return s.erase ? eraseDabAlpha(notes.current!, x, y, brush()) : paintDabOver(notes.current!, x, y, brush(), hexToRgba(st.notesColor));
       case 'mask':
         return null;
       default:
@@ -429,7 +517,7 @@ export function CleanEditor(p: Props) {
       const before = cloneRaster(w);
       const rect = floodFill(w, pt.x, pt.y, hexToRgba(st.color), st.tolerance);
       if (rect) {
-        history.current.push(rect, readRegion(before, rect));
+        pushHistory('work', rect, readRegion(before, rect));
         flush(rect);
         markDirty();
       }
@@ -445,16 +533,19 @@ export function CleanEditor(p: Props) {
       props.current.setMessage('Штамп: сначала Alt+щелчок по месту-источнику.');
       return;
     }
-    const origin = cloneRaster(w);
+    if (st.tool === 'notes' && !st.showNotes) setShowNotes(true);
+    const origin = cloneRaster(st.tool === 'notes' ? notes.current! : w);
     stroke.current = {
       last: [pt.x, pt.y],
       origin,
       dirty: null,
+      erase: st.tool === 'notes' && e.shiftKey,
       ...(st.tool === 'stamp' && stampSource.current ? { stampOffset: [Math.round(stampSource.current[0] - pt.x), Math.round(stampSource.current[1] - pt.y)] as [number, number] } : {}),
     };
     const rect = applyAt(pt.x, pt.y);
     stroke.current.dirty = rect;
-    flush(rect);
+    if (st.tool === 'notes') flushNotes(rect);
+    else flush(rect);
   };
 
   const onMove = (e: React.PointerEvent) => {
@@ -477,7 +568,8 @@ export function CleanEditor(p: Props) {
     }
     s.last = [pt.x, pt.y];
     s.dirty = unionRect(s.dirty, rect);
-    flush(rect, settings.current.tool === 'mask');
+    if (settings.current.tool === 'notes') flushNotes(rect);
+    else flush(rect, settings.current.tool === 'mask');
   };
 
   const onUp = () => {
@@ -485,7 +577,12 @@ export function CleanEditor(p: Props) {
     const s = stroke.current;
     stroke.current = null;
     if (!s || settings.current.tool === 'mask' || !s.dirty) return;
-    history.current.push(s.dirty, readRegion(s.origin, s.dirty));
+    if (settings.current.tool === 'notes') {
+      pushHistory('notes', s.dirty, readRegion(s.origin, s.dirty));
+      markNotesDirty();
+      return;
+    }
+    pushHistory('work', s.dirty, readRegion(s.origin, s.dirty));
     markDirty();
   };
 
@@ -514,11 +611,7 @@ export function CleanEditor(p: Props) {
       if (e.ctrlKey && (e.code === 'KeyZ' || e.code === 'KeyY')) {
         e.preventDefault();
         if (!w) return;
-        const rect = e.code === 'KeyZ' && !e.shiftKey ? history.current.undo(w) : history.current.redo(w);
-        if (rect) {
-          flush(rect);
-          markDirty();
-        }
+        undoRedo(!(e.code === 'KeyZ' && !e.shiftKey));
         return;
       }
       if (e.ctrlKey && e.code === 'KeyS') {
@@ -567,7 +660,7 @@ export function CleanEditor(p: Props) {
         <div className="seg">
           {(Object.keys(TOOL_RU) as CleanTool[]).map((t) => (
             <button key={t} aria-pressed={tool === t} onClick={() => setTool(t)} title={TOOL_RU[t]}>
-              {{ brush: 'Кисть', eraser: 'Ластик', fill: 'Заливка', stamp: 'Штамп', mask: 'Маска' }[t]}
+              {{ brush: 'Кисть', eraser: 'Ластик', fill: 'Заливка', stamp: 'Штамп', mask: 'Маска', notes: 'Пометка' }[t]}
             </button>
           ))}
         </div>
@@ -576,7 +669,12 @@ export function CleanEditor(p: Props) {
             Размер <input type="range" min={1} max={300} value={size} onChange={(e) => setSize(Number(e.target.value))} /> <span className="mono">{size}</span>
           </label>
         )}
-        {(tool === 'brush' || tool === 'eraser' || tool === 'stamp') && (
+        {tool === 'notes' && (
+          <label className="check" title="Цвет пометки; Shift — стирать пометки">
+            Цвет пометки <input type="color" value={notesColor} onChange={(e) => setNotesColor(e.target.value)} />
+          </label>
+        )}
+        {(tool === 'brush' || tool === 'eraser' || tool === 'stamp' || tool === 'notes') && (
           <>
             <label className="check">
               Жёсткость <input type="range" min={0} max={1} step={0.05} value={hardness} onChange={(e) => setHardness(Number(e.target.value))} />
@@ -628,6 +726,9 @@ export function CleanEditor(p: Props) {
           +px <input type="number" min={0} max={20} value={mp.dilate} onChange={(e) => updateMp({ dilate: Number(e.target.value) })} className="num-input" />
         </label>
         <span className="spacer" />
+        <label className="check" title="Слой пометок для тайпера (уходит на сервер как Notes)">
+          <input type="checkbox" checked={showNotes} onChange={(e) => setShowNotes(e.target.checked)} /> пометки
+        </label>
         <label className="check">
           <input type="checkbox" checked={showBoxes} onChange={(e) => setShowBoxes(e.target.checked)} /> боксы
         </label>
@@ -635,7 +736,7 @@ export function CleanEditor(p: Props) {
           onClick={() => {
             const w = work.current;
             if (!w || !raw.current) return;
-            history.current.begin(w, fullRect());
+            pushHistory('work', fullRect(), readRegion(w, fullRect()));
             w.data.set(raw.current.data);
             flush(fullRect());
             markDirty();
@@ -644,8 +745,8 @@ export function CleanEditor(p: Props) {
         >
           Сбросить к raw
         </button>
-        <button className={dirty.current ? 'primary' : ''} disabled={!dirty.current} onClick={() => void save()} title="Ctrl+S">
-          {dirty.current ? 'Сохранить клин' : 'Сохранено'}
+        <button className={dirty.current || notesDirty.current ? 'primary' : ''} disabled={!dirty.current && !notesDirty.current} onClick={() => void save()} title="Клин и пометки (Ctrl+S)">
+          {dirty.current || notesDirty.current ? 'Сохранить' : 'Сохранено'}
         </button>
       </div>
       <div className="stage">
@@ -666,7 +767,7 @@ export function CleanEditor(p: Props) {
           onContextMenu={(e) => e.preventDefault()}
         />
         {loading && <div className="stage-info">Загрузка страницы…</div>}
-        <div className="stage-help">B кисть · E ластик · G заливка · S штамп · M маска · [ ] размер · Enter — LaMa · Esc — сбросить маску · Ctrl+Z</div>
+        <div className="stage-help">B кисть · E ластик · G заливка · S штамп · M маска · N пометка · [ ] размер · Enter — LaMa · Esc — сбросить маску · Ctrl+Z</div>
       </div>
     </div>
   );

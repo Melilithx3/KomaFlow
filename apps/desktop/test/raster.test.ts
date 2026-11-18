@@ -3,6 +3,9 @@ import {
   applyMasked,
   brushAlpha,
   cloneDab,
+  eraseDabAlpha,
+  hasVisiblePixels,
+  paintDabOver,
   cloneRaster,
   createRaster,
   floodFill,
@@ -93,5 +96,24 @@ describe('raster tools', () => {
     const pts = strokePoints(0, 0, 10, 0, 4);
     expect(pts.at(-1)).toEqual([10, 0]);
     expect(pts.length).toBe(10);
+  });
+});
+
+
+describe('notes layer (transparent)', () => {
+  it('paints over transparency with alpha and erases back to transparent', () => {
+    const r = createRaster(30, 30);
+    expect(hasVisiblePixels(r)).toBe(false);
+    paintDabOver(r, 15, 15, { radius: 4, hardness: 1, opacity: 1 }, [255, 0, 0, 255]);
+    expect(pixelAt(r, 15, 15)).toEqual([255, 0, 0, 255]);
+    expect(pixelAt(r, 1, 1)[3]).toBe(0);
+    expect(hasVisiblePixels(r)).toBe(true);
+    paintDabOver(r, 15, 15, { radius: 4, hardness: 1, opacity: 0.5 }, [0, 0, 255, 255]);
+    const mixed = pixelAt(r, 15, 15);
+    expect(mixed[3]).toBe(255);
+    expect(mixed[0]).toBeGreaterThan(100);
+    expect(mixed[2]).toBeGreaterThan(100);
+    eraseDabAlpha(r, 15, 15, { radius: 6, hardness: 1, opacity: 1 });
+    expect(hasVisiblePixels(r)).toBe(false);
   });
 });

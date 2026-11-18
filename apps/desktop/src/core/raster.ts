@@ -88,6 +88,36 @@ export function restoreDab(r: Raster, source: Raster, cx: number, cy: number, b:
   return dabOp(r, cx, cy, b, (i, a) => blendPixel(r.data, i, source.data[i]!, source.data[i + 1]!, source.data[i + 2]!, a));
 }
 
+/**
+ * Brush on a transparent layer (notes for the typer): source-over with the brush alpha, so strokes keep
+ * soft edges and the layer stays transparent elsewhere.
+ */
+export function paintDabOver(r: Raster, cx: number, cy: number, b: Brush, color: RGBA): Rect | null {
+  const ca = color[3] / 255;
+  return dabOp(r, cx, cy, b, (i, a) => {
+    const d = r.data;
+    const sa = a * ca;
+    const da = d[i + 3]! / 255;
+    const oa = sa + da * (1 - sa);
+    if (oa <= 0) return;
+    for (let c = 0; c < 3; c++) d[i + c] = (color[c]! * sa + d[i + c]! * da * (1 - sa)) / oa;
+    d[i + 3] = oa * 255;
+  });
+}
+
+/** Eraser on a transparent layer: lowers alpha under the brush. */
+export function eraseDabAlpha(r: Raster, cx: number, cy: number, b: Brush): Rect | null {
+  return dabOp(r, cx, cy, b, (i, a) => {
+    r.data[i + 3] = r.data[i + 3]! * (1 - a);
+  });
+}
+
+/** True when any pixel of the layer is not fully transparent. */
+export function hasVisiblePixels(r: Raster): boolean {
+  for (let i = 3; i < r.data.length; i += 4) if (r.data[i]! > 0) return true;
+  return false;
+}
+
 /** Clone stamp: copies from `source` (a snapshot taken at stroke start) at offset (dx, dy). */
 export function cloneDab(r: Raster, source: Raster, cx: number, cy: number, dx: number, dy: number, b: Brush): Rect | null {
   return dabOp(r, cx, cy, b, (i, a, x, y) => {
