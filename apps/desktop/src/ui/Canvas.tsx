@@ -279,9 +279,7 @@ export function Canvas(p: Props) {
         props.current.store.exec(SetRotation(pg.id, d.id, deg, d.gesture));
         return;
       }
-      let nb = resizeRotated(d.orig, d.rotation, d.handle, pt.x - d.start.x, pt.y - d.start.y);
-      // moving keeps the size: clamp the position, not the box
-      if (d.handle === 'move') nb = { ...nb, x: Math.min(Math.max(0, nb.x), pg.width - nb.w), y: Math.min(Math.max(0, nb.y), pg.height - nb.h) };
+      const nb = resizeRotated(d.orig, d.rotation, d.handle, pt.x - d.start.x, pt.y - d.start.y);
       props.current.store.exec(SetBox(pg.id, d.id, nb, d.gesture));
     }
   };

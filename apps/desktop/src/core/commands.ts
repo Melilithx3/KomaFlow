@@ -1,4 +1,4 @@
-import { autoReadingOrder, boxesEqual, clampBox, uuidv7, type Box, type ObjectType, type ReadingDirection } from '@komaflow/contract';
+import { autoReadingOrder, boxesEqual, clampBox, roundBox, uuidv7, type Box, type ObjectType, type ReadingDirection } from '@komaflow/contract';
 import type { FileRef, LocalObject, LocalPage, Workspace } from './model.js';
 import type { Command } from './store.js';
 
@@ -75,7 +75,7 @@ export function newObject(type: ObjectType, box: Box, source_text = ''): LocalOb
 export const AddObject = (pageId: string, obj: LocalObject, index?: number) =>
   pageObjectsCommand('Добавить бокс', pageId, (p) => {
     const list = [...p.objects];
-    list.splice(index ?? list.length, 0, { ...obj, box: clampBox(obj.box, p) });
+    list.splice(index ?? list.length, 0, { ...obj, box: roundBox(obj.box) });
     return list;
   });
 
@@ -89,7 +89,7 @@ export const SetBox = (pageId: string, objectId: string, box: Box, gesture?: str
     pageId,
     (p) => {
       const o = p.objects.find((x) => x.id === objectId);
-      const b = clampBox(box, p);
+      const b = roundBox(box);
       if (!o || boxesEqual(o.box, b)) return null;
       return p.objects.map((x) => (x.id === objectId ? touch({ ...x, box: b }) : x));
     },
@@ -199,6 +199,13 @@ export const ApplyAnalysis = (pageId: string, detected: DetectedObject[], dir: R
 
 /** How many objects ApplyAnalysis would replace (for the confirmation dialog). */
 export const replacedByAnalysis = (p: LocalPage) => p.objects.filter((o) => o.origin === 'auto' && !o.touched).length;
+
+/** Binds (or removes) a page's clean / notes file outside the undo history (clean editor saves). */
+export function withPageFile(ws: Workspace, pageId: string, kind: 'clean' | 'notes', file: FileRef | null): Workspace {
+  const p = ws.pages.find((x) => x.id === pageId);
+  if (!p || (p[kind]?.hash ?? null) === (file?.hash ?? null)) return ws;
+  return { ...ws, pages: ws.pages.map((x) => (x.id === pageId ? { ...x, [kind]: file } : x)) };
+}
 
 /** ImportClean / ImportNotes: binds files to pages (one undo entry for the whole import). */
 export function ImportFiles(kind: 'clean' | 'notes', files: Array<{ pageId: string; file: FileRef | null }>): Command {

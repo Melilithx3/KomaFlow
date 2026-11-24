@@ -25,8 +25,9 @@ import { CleanEditor, type CleanEditorHandle } from './CleanEditor.js';
 import { ImportDialog, Modal, PublishDialog } from './Dialogs.js';
 import { LayoutSettings } from './LayoutSettings.js';
 import { sidecarOptions } from './session.js';
+import { AiJsonDialog, ObjectTextEditor } from './TextPanel.js';
 
-type Dialog = null | 'clean' | 'notes' | 'publish' | 'layout';
+type Dialog = null | 'clean' | 'notes' | 'publish' | 'layout' | 'ai';
 
 export function Editor({ ctx, initial, onClose }: { ctx: AppCtx; initial: Workspace; onClose: () => void }) {
   const store = useMemo(() => new Store(initial), [initial]);
@@ -46,6 +47,20 @@ export function Editor({ ctx, initial, onClose }: { ctx: AppCtx; initial: Worksp
   const [message, setMessage] = useState<string | null>(null);
   const [dropAt, setDropAt] = useState<number | null>(null);
   const orderSeq = useRef<string[]>([]);
+  /**
+   * Reordering the list by dragging with the pointer (HTML5 drag and drop does not reach the page in the
+   * Tauri window on Windows: the WebView handles drags as file drops). A drag starts after 4 px.
+   */
+  const listRef = useRef<HTMLOListElement>(null);
+  const drag = useRef<{ id: string; from: number; x: number; y: number; active: boolean } | null>(null);
+  const dropIndex = (clientY: number) => {
+    const items = [...(listRef.current?.children ?? [])] as HTMLElement[];
+    for (let i = 0; i < items.length; i++) {
+      const r = items[i]!.getBoundingClientRect();
+      if (clientY < r.top + r.height / 2) return i;
+    }
+    return items.length;
+  };
   const sourceRef = useRef<HTMLTextAreaElement>(null);
 
   // autosave (~1 s debounce, atomic writes, only changed pages)
@@ -80,20 +95,20 @@ export function Editor({ ctx, initial, onClose }: { ctx: AppCtx; initial: Worksp
     [store],
   );
   /** Leaving a page or the clean mode saves unsaved clean pixels first. */
-  const saveClean = useCallback(async () => {
-    if (cleanRef.current?.dirty()) await cleanRef.current.save();
+  /** false = the clean could not be written (the editor shows why); the caller stays on the page. */
+  const saveClean = useCallback(async (): Promise<boolean> => {
+    if (cleanRef.current?.dirty()) return cleanRef.current.save();
+    return true;
   }, []);
   const openPage = useCallback(
     async (id: string) => {
-      await saveClean();
-      store.select({ pageId: id });
+      if (await saveClean()) store.select({ pageId: id });
     },
     [saveClean, store],
   );
   const switchPage = useCallback(
     async (d: -1 | 1) => {
-      await saveClean();
-      goPage(d);
+      if (await saveClean()) goPage(d);
     },
     [saveClean, goPage],
   );
@@ -190,14 +205,18 @@ export function Editor({ ctx, initial, onClose }: { ctx: AppCtx; initial: Worksp
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (modeRef.current === 'clean') {
-        if (e.code === 'PageUp' || e.code === 'PageDown') {
+        const inField = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement;
+        if ((e.code === 'PageUp' || e.code === 'PageDown') && !inField) {
           e.preventDefault();
           void switchPage(e.code === 'PageUp' ? -1 : 1);
         }
         return;
       }
-      const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement;
+      const typing =
+        e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement || (e.target instanceof HTMLElement && e.target.isContentEditable);
       const k = e.key;
+      // PgUp/PgDn change the page in both modes (not while typing in a field)
+      if ((e.code === 'PageUp' || e.code === 'PageDown') && !typing) return e.preventDefault(), goPage(e.code === 'PageUp' ? -1 : 1);
       if (e.ctrlKey && (k === 'z' || k === 'я') && !typing) return e.preventDefault(), store.undo();
       if (e.ctrlKey && (k === 'y' || k === 'н') && !typing) return e.preventDefault(), store.redo();
       if (e.ctrlKey && (k === 's' || k === 'ы')) return e.preventDefault(), void saver.flush().then(() => setMessage('Сохранено'));
@@ -230,7 +249,7 @@ export function Editor({ ctx, initial, onClose }: { ctx: AppCtx; initial: Worksp
         const s = e.shiftKey ? 10 : 1;
         const d = { ArrowLeft: [-s, 0], ArrowRight: [s, 0], ArrowUp: [0, -s], ArrowDown: [0, s] }[k] as [number, number];
         const b = so.box;
-        store.exec(SetBox(pg.id, so.id, { ...b, x: Math.min(Math.max(0, b.x + d[0]), pg.width - b.w), y: Math.min(Math.max(0, b.y + d[1]), pg.height - b.h) }, 'keys'));
+        store.exec(SetBox(pg.id, so.id, { ...b, x: b.x + d[0], y: b.y + d[1] }, 'keys'));
       } else return;
       e.preventDefault();
     };
@@ -279,7 +298,7 @@ export function Editor({ ctx, initial, onClose }: { ctx: AppCtx; initial: Worksp
       <header className="toolbar">
         <button
           onClick={async () => {
-            await saveClean();
+            if (!(await saveClean())) return;
             await saver.flush();
             onClose();
           }}
@@ -290,7 +309,7 @@ export function Editor({ ctx, initial, onClose }: { ctx: AppCtx; initial: Worksp
           {ws.title}
         </strong>
         <div className="seg mode" role="group" aria-label="Режим">
-          <button aria-pressed={mode === 'markup'} onClick={async () => (await saveClean(), setMode('markup'))}>
+          <button aria-pressed={mode === 'markup'} onClick={async () => (await saveClean()) && setMode('markup')}>
             Разметка
           </button>
           <button aria-pressed={mode === 'clean'} onClick={() => setMode('clean')}>
@@ -348,6 +367,11 @@ export function Editor({ ctx, initial, onClose }: { ctx: AppCtx; initial: Worksp
           Импорт клина…
         </button>
         <button onClick={() => setDialog('notes')}>Пометки…</button>
+        {mode === 'markup' && (
+          <button onClick={() => setDialog('ai')} disabled={!ctx.api.authed || !ws.server} title={ws.server ? 'Экспорт оригиналов и импорт перевода в JSON (как в вебе)' : 'Сначала опубликуйте главу'}>
+            JSON для ИИ
+          </button>
+        )}
         <span className="spacer" />
         {mode === 'markup' && (
           <label className="check">
@@ -357,7 +381,7 @@ export function Editor({ ctx, initial, onClose }: { ctx: AppCtx; initial: Worksp
         <button onClick={() => setFitSignal((n) => n + 1)} title="Вписать (F)">
           Вписать
         </button>
-        <button className="primary" onClick={async () => (await saveClean(), setDialog('publish'))} disabled={!ctx.api.authed} title={ctx.api.authed ? '' : 'Войдите на сервер'}>
+        <button className="primary" onClick={async () => (await saveClean()) && setDialog('publish')} disabled={!ctx.api.authed} title={ctx.api.authed ? '' : 'Войдите на сервер'}>
           Опубликовать
         </button>
       </header>
@@ -441,32 +465,41 @@ export function Editor({ ctx, initial, onClose }: { ctx: AppCtx; initial: Worksp
           <strong>Объекты ({page.objects.length})</strong>
           <span className="muted small">перетащите или впишите номер</span>
         </div>
-        <ol className="objects" aria-label="Объекты" onDragLeave={() => setDropAt(null)}>
+        <ol className={`objects${dropAt !== null ? ' dragging' : ''}`} aria-label="Объекты" ref={listRef}>
           {page.objects.map((o, i) => (
             <li
               key={o.id}
-              className={`${o.id === sel.objectId ? 'active' : ''}${dropAt === i ? ' drop-before' : ''}${dropAt === i + 1 && i === page.objects.length - 1 ? ' drop-after' : ''}`}
-              draggable
-              onDragStart={(e) => {
-                e.dataTransfer.setData('text/plain', o.id);
-                e.dataTransfer.effectAllowed = 'move';
+              className={`${o.id === sel.objectId ? 'active' : ''}${dropAt === i ? ' drop-before' : ''}${dropAt === i + 1 && i === page.objects.length - 1 ? ' drop-after' : ''}${drag.current?.active && drag.current.id === o.id ? ' dragged' : ''}`}
+              onPointerDown={(e) => {
+                if (e.button !== 0 || (e.target as HTMLElement).closest('button, input, textarea, select')) return;
+                drag.current = { id: o.id, from: i, x: e.clientX, y: e.clientY, active: false };
+                e.currentTarget.setPointerCapture(e.pointerId);
               }}
-              onDragOver={(e) => {
-                e.preventDefault();
-                const r = e.currentTarget.getBoundingClientRect();
-                setDropAt(e.clientY > r.top + r.height / 2 ? i + 1 : i);
+              onPointerMove={(e) => {
+                const d = drag.current;
+                if (!d) return;
+                if (!d.active && Math.hypot(e.clientX - d.x, e.clientY - d.y) < 4) return;
+                d.active = true;
+                setDropAt(dropIndex(e.clientY));
               }}
-              onDrop={(e) => {
-                e.preventDefault();
-                const id = e.dataTransfer.getData('text/plain');
-                const from = page.objects.findIndex((x) => x.id === id);
-                const to = dropAt ?? i;
+              onPointerUp={(e) => {
+                const d = drag.current;
+                drag.current = null;
                 setDropAt(null);
-                if (from >= 0) store.exec(MoveInOrder(page, id, to > from ? to - 1 : to));
+                if (!d?.active) return;
+                const to = dropIndex(e.clientY);
+                const target = to > d.from ? to - 1 : to;
+                if (target !== d.from) store.exec(MoveInOrder(page, d.id, target));
               }}
-              onDragEnd={() => setDropAt(null)}
+              onPointerCancel={() => {
+                drag.current = null;
+                setDropAt(null);
+              }}
               onClick={() => store.select({ objectId: o.id })}
             >
+              <span className="grip" aria-hidden="true" title="Перетащите, чтобы изменить порядок">
+                ⋮⋮
+              </span>
               <OrderNumber
                 n={i + 1}
                 max={page.objects.length}
@@ -535,13 +568,7 @@ export function Editor({ ctx, initial, onClose }: { ctx: AppCtx; initial: Worksp
             <button disabled={!!ocrOff || !!task} title={ocrOff ?? ''} onClick={() => void runOcr([page], [selected.id])}>
               Перечитать OCR этого бокса
             </button>
-            {selected.web && (
-              <div className="web">
-                {selected.web.flagged && <p className="flag">⚑ Флажок из веба</p>}
-                {selected.web.comment && <p>Комментарий: {selected.web.comment}</p>}
-                {selected.web.translation && <p className="muted">Перевод: {selected.web.translation}</p>}
-              </div>
-            )}
+            <ObjectTextEditor ctx={ctx} store={store} obj={selected} published={page.server_markup_rev !== null && ctx.api.authed} />
           </div>
         )}
       </aside>
@@ -550,6 +577,8 @@ export function Editor({ ctx, initial, onClose }: { ctx: AppCtx; initial: Worksp
         <ImportDialog ctx={ctx} kind={dialog} store={store} onClose={() => setDialog(null)} />
       ) : dialog === 'publish' ? (
         <PublishDialog ctx={ctx} store={store} onClose={() => setDialog(null)} />
+      ) : dialog === 'ai' ? (
+        <AiJsonDialog ctx={ctx} store={store} onClose={() => setDialog(null)} />
       ) : dialog === 'layout' ? (
         <Modal title="Параметры разметки" onClose={() => setDialog(null)}>
           <LayoutSettings settings={ctx.settings} onChange={ctx.setSettings} />

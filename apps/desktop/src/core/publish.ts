@@ -1,7 +1,9 @@
-import type { MarkupSummary, PageDetailResponse } from '@komaflow/contract';
+import type { MarkupSummary } from '@komaflow/contract';
 import { ApiFailure, type ApiClient } from './api.js';
 import type { Host } from './host.js';
-import type { FileRef, LocalObject, LocalPage, Workspace } from './model.js';
+import { pageBase } from './pull.js';
+import { webOf } from './translation.js';
+import type { FileRef, LocalPage, Workspace } from './model.js';
 import { fileRef, pageDigest, toSyncPage } from './workspace.js';
 
 export interface PublishPlan {
@@ -137,7 +139,8 @@ export async function publish(host: Host, api: ApiClient, ws0: Workspace, opts: 
             // the server now holds what we sent (new object, applied original, or already equal)
             return o.server_source === o.source_text ? o : { ...o, server_source: o.source_text };
           });
-          const next = { ...p, objects, server_markup_rev: r.markup_rev };
+          const next: LocalPage = { ...p, objects, server_markup_rev: r.markup_rev };
+          next.base = pageBase(next);
           // a page with unresolved originals stays «изменена после публикации»
           return { ...next, published_digest: conflicted.size ? p.published_digest : pageDigest(next) };
         }),
@@ -159,12 +162,6 @@ export async function publish(host: Host, api: ApiClient, ws0: Workspace, opts: 
 
 // ---------------------------------------------------------------- download (docs/05 §4.4)
 
-const webOf = (o: PageDetailResponse['objects'][number]): LocalObject['web'] => ({
-  flagged: o.flagged,
-  comment: o.comment,
-  translation: o.translation,
-  state: o.state,
-});
 
 /** Builds a workspace from a server chapter; blobs missing locally are downloaded into the cache. */
 export async function downloadChapter(
@@ -212,6 +209,7 @@ export async function downloadChapter(
       published_digest: null,
     };
     page.published_digest = pageDigest(page);
+    page.base = pageBase(page);
     pages.push(page);
     onProgress(++done, ch.pages.length);
   }

@@ -69,12 +69,18 @@ describe('workspace and store', () => {
     expect(s.canUndo()).toBe(false);
   });
 
-  it('boxes are clamped into the page; no-op commands leave no history', () => {
+  it('boxes keep their geometry outside the page (ADR 0018); no-op commands leave no history', () => {
     const s = new Store(ws);
     const pid = ws.pages[0]!.id;
     const o = newObject('text', { x: 90, y: 190, w: 50, h: 50 });
     s.exec(AddObject(pid, o));
-    expect(s.get().ws.pages[0]!.objects[0]!.box).toEqual({ x: 90, y: 190, w: 10, h: 10 });
+    expect(s.get().ws.pages[0]!.objects[0]!.box).toEqual({ x: 90, y: 190, w: 50, h: 50 });
+    // a horizontal box rotated by 90° and pushed against the left edge: centre may be outside the page
+    s.exec(SetBox(pid, o.id, { x: -30.4, y: 20, w: 50, h: 10 }));
+    s.exec(SetRotation(pid, o.id, 90));
+    expect(s.get().ws.pages[0]!.objects[0]!.box).toEqual({ x: -30, y: 20, w: 50, h: 10 });
+    s.undo();
+    s.undo();
     s.exec(SetType(pid, o.id, 'text'));
     s.exec(SetSourceText(pid, o.id, ''));
     expect(s.historyLabels()).toHaveLength(1);

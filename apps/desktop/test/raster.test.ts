@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   applyMasked,
+  beginStroke,
+  findResiduals,
   brushAlpha,
   cloneDab,
   eraseDabAlpha,
@@ -115,5 +117,68 @@ describe('notes layer (transparent)', () => {
     expect(mixed[2]).toBeGreaterThan(100);
     eraseDabAlpha(r, 15, 15, { radius: 6, hardness: 1, opacity: 1 });
     expect(hasVisiblePixels(r)).toBe(false);
+  });
+});
+
+describe('brush behaviour (review 2026-11-24)', () => {
+  it('a soft brush held in one stroke does not build up; a new stroke may', () => {
+    const r = createRaster(40, 40, [255, 255, 255, 255]);
+    const soft = { radius: 8, hardness: 0, opacity: 0.5 };
+    const s = beginStroke(r);
+    for (let i = 0; i < 50; i++) paintDab(r, 20, 20, soft, [0, 0, 0, 255], s);
+    const once = pixelAt(r, 20, 20)[0];
+    expect(once).toBeGreaterThan(120); // 50 % opacity, not black
+    paintDab(r, 20, 20, soft, [0, 0, 0, 255], beginStroke(r));
+    expect(pixelAt(r, 20, 20)[0]).toBeLessThan(once); // second stroke darkens
+  });
+
+  it('hardness changes the edge over the whole range', () => {
+    const at = (h: number) => brushAlpha(8, 10, h);
+    expect(at(0)).toBeLessThan(at(0.5));
+    expect(at(0.5)).toBeLessThan(at(0.9));
+    expect(brushAlpha(9, 10, 1) - brushAlpha(9, 10, 0.9)).toBeGreaterThan(0.3); // top of the range is distinguishable
+    expect(brushAlpha(9.2, 10, 1)).toBe(1);
+    expect(brushAlpha(0.2, 0.5, 1)).toBeGreaterThan(0.5); // fractional sizes still paint
+  });
+
+  it('object text mask ignores JPEG-like specks near letters but keeps faint letter edges', () => {
+    const W = 60;
+    const r = createRaster(W, W, [250, 250, 250, 255]);
+    const put = (x: number, y: number, v: number) => r.data.set([v, v, v, 255], (y * W + x) * 4);
+    for (let x = 20; x < 40; x++) for (let y = 28; y < 32; y++) put(x, y, 10); // letter stroke
+    for (let x = 20; x < 40; x++) put(x, 27, 140); // anti-aliased edge (faint, touches the letter)
+    put(12, 12, 140); // isolated compression specks
+    put(45, 40, 135);
+    put(46, 40, 138);
+    const mask = new Uint8Array(W * W);
+    textMask(r, { x: 5, y: 5, w: 50, h: 50 }, mask, { threshold: 150, dilate: 0, inset: 0 });
+    expect(mask[30 * W + 30]).toBe(255);
+    expect(mask[27 * W + 30]).toBe(255); // edge kept
+    expect(mask[12 * W + 12]).toBe(0); // speck dropped
+    expect(mask[40 * W + 45]).toBe(0);
+  });
+
+  it('text mask follows a rotated box', () => {
+    const r = createRaster(60, 60, [255, 255, 255, 255]);
+    for (let y = 10; y < 50; y++) r.data.set([0, 0, 0, 255], (y * 60 + 30) * 4); // vertical line
+    const mask = new Uint8Array(60 * 60);
+    // horizontal 40x6 box rotated by 90° covers the vertical line
+    textMask(r, { x: 10, y: 27, w: 40, h: 6 }, mask, { threshold: 128, dilate: 0, inset: 0, rotation: 90 });
+    expect(mask[15 * 60 + 30]).toBe(255);
+    expect(mask[45 * 60 + 30]).toBe(255);
+  });
+
+  it('residual inspection finds a single leftover pixel where the text was', () => {
+    const W = 50;
+    const raw = createRaster(W, W, [255, 255, 255, 255]);
+    for (let x = 15; x < 35; x++) for (let y = 23; y < 27; y++) raw.data.set([0, 0, 0, 255], (y * W + x) * 4);
+    const clean = createRaster(W, W, [255, 255, 255, 255]);
+    const objects = [{ box: { x: 5, y: 5, w: 40, h: 40 } }];
+    expect(findResiduals(clean, raw, objects, { sensitivity: 30, threshold: 150 }).pixels).toBe(0);
+    clean.data.set([120, 120, 120, 255], (25 * W + 20) * 4);
+    const res = findResiduals(clean, raw, objects, { sensitivity: 30, threshold: 150 });
+    expect(res.pixels).toBe(1);
+    expect(res.clusters).toEqual([{ x: 20, y: 25, w: 1, h: 1 }]);
+    expect(pixelAt(clean, 20, 25)[0]).toBe(120); // inspection never changes the clean
   });
 });

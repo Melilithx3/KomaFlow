@@ -40,6 +40,8 @@ input, select, textarea { background: var(--sunken); border: 1px solid var(--lin
 input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 textarea { width: 100%; resize: vertical; line-height: 1.4; }
 input[type='checkbox'] { accent-color: var(--accent); }
+/* range inputs must not inherit the text-field padding/border: it shrinks the track, so the thumb never reached the ends */
+input[type='range'] { padding: 0; border: 0; background: transparent; box-shadow: none; margin: 0; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .muted { color: var(--muted); }
 .small { font-size: 0.82em; }
@@ -103,6 +105,21 @@ input[type='checkbox'] { accent-color: var(--accent); }
 .objects li:hover { background: var(--panel-2); }
 .objects li.drop-before { border-top-color: var(--accent); }
 .objects li.drop-after { border-bottom-color: var(--accent); }
+.objects li { touch-action: none; user-select: none; }
+.objects.dragging li { cursor: grabbing; }
+.objects li.dragged { opacity: 0.45; }
+.objects .grip { color: var(--muted); font-size: 0.75rem; letter-spacing: -2px; cursor: grab; flex: none; }
+.text-editor { display: flex; flex-direction: column; gap: 0.4rem; margin-top: 0.4rem; }
+.text-editor textarea { width: 100%; resize: vertical; }
+.text-editor .conflict { border: 1px solid #f59e0b; border-radius: 6px; padding: 0.4rem 0.55rem; background: #f59e0b14; }
+.modal.wide { width: min(860px, 94vw); }
+.modal textarea.code { width: 100%; font-family: ui-monospace, Consolas, monospace; font-size: 0.8rem; }
+.preview-table { max-height: 40vh; overflow: auto; }
+.preview-table table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+.preview-table td, .preview-table th { border-bottom: 1px solid var(--line); padding: 0.25rem 0.4rem; text-align: left; vertical-align: top; }
+.pre { white-space: pre-wrap; }
+.file-btn { position: relative; overflow: hidden; display: inline-flex; align-items: center; padding: 0.28rem 0.65rem; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); cursor: pointer; }
+.file-btn input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
 .otext { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .num { color: #fff; font-weight: 700; min-width: 1.6rem; height: 1.6rem; display: inline-grid; place-items: center; font-size: 0.8rem; flex: none; border: none; padding: 0 0.3rem; cursor: text; }
 .num:hover:not(:disabled) { color: #fff; outline: 2px solid #fff6; }
@@ -134,10 +151,23 @@ input[type='checkbox'] { accent-color: var(--accent); }
 .clean-stage { display: flex; flex-direction: column; }
 .clean-editor { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .clean-tools { display: flex; flex-wrap: wrap; gap: 0.45rem; align-items: center; padding: 0.35rem 0.55rem; background: var(--panel-2); border-bottom: 1px solid var(--line); }
-.clean-tools input[type='range'] { width: 90px; accent-color: var(--accent); }
+.clean-tools input[type='range'] { width: 110px; accent-color: var(--accent); }
+.clean-tools input[type='range'].short { width: 70px; }
+.clean-tools .val { min-width: 2.6rem; text-align: right; font-size: 0.8rem; }
+.clean-tools .num-input { width: 4.2rem; }
+.save-state.pending { border-color: var(--accent); }
+.save-state.error { border-color: #ef4444; color: #fca5a5; }
+.raw-badge { left: 50% !important; transform: translateX(-50%); top: 0.5rem; bottom: auto !important; background: #b45309e0 !important; }
 .clean-tools input[type='color'] { width: 2rem; height: 1.6rem; padding: 0; border-radius: 5px; cursor: pointer; }
 .clean-editor .stage { position: relative; flex: 1; min-height: 0; }
 .mono { font-variant-numeric: tabular-nums; min-width: 2.2em; display: inline-block; }
 .seg.mode button { font-weight: 600; }
 .sep { width: 1px; height: 1.4rem; background: var(--line-strong); }
 pre.log { white-space: pre-wrap; background: var(--sunken); border: 1px solid var(--line); border-radius: 6px; padding: 0.5rem; font-size: 0.8rem; max-height: 12rem; overflow: auto; }
+.sync-cats { display: flex; flex-direction: column; gap: 0.35rem; margin: 0.5rem 0; }
+.sync-cat { display: flex; gap: 0.55rem; align-items: flex-start; padding: 0.4rem 0.55rem; border: 1px solid var(--line); border-radius: 6px; }
+.sync-cat.idle { opacity: 0.7; }
+.st-server { color: #93c5fd; }
+.st-local { color: #a7f3d0; }
+.st-conflict { color: #fca5a5; font-weight: 600; }
+.warn-text { color: #fbbf24; }

@@ -62,13 +62,21 @@ export function writeRegion(r: Raster, rect: Rect, patch: Raster): void {
   }
 }
 
-/** Brush coverage 0..1 at distance `d` from the centre: solid core, smooth falloff (hardness 0..1). */
+/**
+ * Brush coverage 0..1 at distance `d` from the centre (hardness 0..1). The soft edge widens
+ * non-linearly as hardness drops, so the top of the range stays distinguishable (0.9 vs 1.0), and the
+ * falloff gets a higher power at low hardness: 0 is a feathery brush, 1 a hard edge with ~1 px of
+ * anti-aliasing.
+ */
 export function brushAlpha(d: number, radius: number, hardness: number): number {
   if (d >= radius) return 0;
-  const core = radius * Math.min(0.999, Math.max(0, hardness));
+  const h = Math.min(1, Math.max(0, hardness));
+  const soft = Math.max(Math.min(1, radius) * 0.75, radius * Math.pow(1 - h, 0.7));
+  const core = radius - soft;
   if (d <= core) return 1;
-  const t = (d - core) / (radius - core);
-  return 1 - t * t * (3 - 2 * t);
+  const t = (d - core) / soft;
+  const s = 1 - t * t * (3 - 2 * t);
+  return Math.pow(s, 1 + 2 * (1 - h) * (1 - h));
 }
 
 export interface Brush {
@@ -78,37 +86,50 @@ export interface Brush {
   opacity: number;
 }
 
-/** Paints a round dab of `color`. */
-export function paintDab(r: Raster, cx: number, cy: number, b: Brush, color: RGBA): Rect | null {
-  return dabOp(r, cx, cy, b, (i, a) => blendPixel(r.data, i, color[0], color[1], color[2], (color[3] / 255) * a));
+/**
+ * One continuous stroke: the layer as it was at stroke start and the highest coverage each pixel got so
+ * far (0..255). Dabs inside a stroke raise coverage to a maximum instead of adding up, so holding a soft
+ * brush in place or moving slowly does not darken the spot (no airbrush build-up). A new stroke starts
+ * from the current pixels and may build up over the previous one.
+ */
+export interface StrokeState {
+  origin: Raster;
+  cover: Uint8Array;
+}
+
+export const beginStroke = (r: Raster): StrokeState => ({ origin: cloneRaster(r), cover: new Uint8Array(r.width * r.height) });
+
+/** Paints a round dab of `color`. Within a stroke (`s`) coverage does not build up. */
+export function paintDab(r: Raster, cx: number, cy: number, b: Brush, color: RGBA, s?: StrokeState): Rect | null {
+  return dabOp(r, cx, cy, b, s, (i, a, base) => blendPixel(r.data, base, i, color[0], color[1], color[2], (color[3] / 255) * a));
 }
 
 /** Eraser: brings back pixels of `source` (the raw page). */
-export function restoreDab(r: Raster, source: Raster, cx: number, cy: number, b: Brush): Rect | null {
-  return dabOp(r, cx, cy, b, (i, a) => blendPixel(r.data, i, source.data[i]!, source.data[i + 1]!, source.data[i + 2]!, a));
+export function restoreDab(r: Raster, source: Raster, cx: number, cy: number, b: Brush, s?: StrokeState): Rect | null {
+  return dabOp(r, cx, cy, b, s, (i, a, base) => blendPixel(r.data, base, i, source.data[i]!, source.data[i + 1]!, source.data[i + 2]!, a));
 }
 
 /**
  * Brush on a transparent layer (notes for the typer): source-over with the brush alpha, so strokes keep
  * soft edges and the layer stays transparent elsewhere.
  */
-export function paintDabOver(r: Raster, cx: number, cy: number, b: Brush, color: RGBA): Rect | null {
+export function paintDabOver(r: Raster, cx: number, cy: number, b: Brush, color: RGBA, s?: StrokeState): Rect | null {
   const ca = color[3] / 255;
-  return dabOp(r, cx, cy, b, (i, a) => {
+  return dabOp(r, cx, cy, b, s, (i, a, base) => {
     const d = r.data;
     const sa = a * ca;
-    const da = d[i + 3]! / 255;
+    const da = base[i + 3]! / 255;
     const oa = sa + da * (1 - sa);
     if (oa <= 0) return;
-    for (let c = 0; c < 3; c++) d[i + c] = (color[c]! * sa + d[i + c]! * da * (1 - sa)) / oa;
+    for (let c = 0; c < 3; c++) d[i + c] = (color[c]! * sa + base[i + c]! * da * (1 - sa)) / oa;
     d[i + 3] = oa * 255;
   });
 }
 
 /** Eraser on a transparent layer: lowers alpha under the brush. */
-export function eraseDabAlpha(r: Raster, cx: number, cy: number, b: Brush): Rect | null {
-  return dabOp(r, cx, cy, b, (i, a) => {
-    r.data[i + 3] = r.data[i + 3]! * (1 - a);
+export function eraseDabAlpha(r: Raster, cx: number, cy: number, b: Brush, s?: StrokeState): Rect | null {
+  return dabOp(r, cx, cy, b, s, (i, a, base) => {
+    r.data[i + 3] = base[i + 3]! * (1 - a);
   });
 }
 
@@ -119,13 +140,13 @@ export function hasVisiblePixels(r: Raster): boolean {
 }
 
 /** Clone stamp: copies from `source` (a snapshot taken at stroke start) at offset (dx, dy). */
-export function cloneDab(r: Raster, source: Raster, cx: number, cy: number, dx: number, dy: number, b: Brush): Rect | null {
-  return dabOp(r, cx, cy, b, (i, a, x, y) => {
+export function cloneDab(r: Raster, source: Raster, cx: number, cy: number, dx: number, dy: number, b: Brush, s?: StrokeState): Rect | null {
+  return dabOp(r, cx, cy, b, s, (i, a, base, x, y) => {
     const sx = x + dx;
     const sy = y + dy;
     if (sx < 0 || sy < 0 || sx >= source.width || sy >= source.height) return;
     const j = (sy * source.width + sx) * 4;
-    blendPixel(r.data, i, source.data[j]!, source.data[j + 1]!, source.data[j + 2]!, a);
+    blendPixel(r.data, base, i, source.data[j]!, source.data[j + 1]!, source.data[j + 2]!, a);
   });
 }
 
@@ -140,27 +161,48 @@ export function maskDab(mask: Uint8Array, width: number, height: number, cx: num
   return rect;
 }
 
-function dabOp(r: Raster, cx: number, cy: number, b: Brush, fn: (i: number, a: number, x: number, y: number) => void): Rect | null {
+/**
+ * Runs `fn` for every pixel under a round dab with the effective alpha and the array to blend from: the
+ * stroke origin when a stroke state is given (alpha = max coverage within the stroke x opacity), else the
+ * current pixels (alpha accumulates: single dabs, tests).
+ */
+function dabOp(
+  r: Raster,
+  cx: number,
+  cy: number,
+  b: Brush,
+  s: StrokeState | undefined,
+  fn: (i: number, a: number, base: Uint8ClampedArray, x: number, y: number) => void,
+): Rect | null {
   const rect = clipRect({ x: cx - b.radius, y: cy - b.radius, w: b.radius * 2 + 1, h: b.radius * 2 + 1 }, r.width, r.height);
   if (!rect) return null;
+  const base = s ? s.origin.data : r.data;
   for (let y = rect.y; y < rect.y + rect.h; y++)
     for (let x = rect.x; x < rect.x + rect.w; x++) {
-      const a = brushAlpha(Math.hypot(x + 0.5 - cx, y + 0.5 - cy), b.radius, b.hardness) * b.opacity;
-      if (a > 0) fn((y * r.width + x) * 4, a, x, y);
+      let a = brushAlpha(Math.hypot(x + 0.5 - cx, y + 0.5 - cy), b.radius, b.hardness);
+      if (a <= 0) continue;
+      if (s) {
+        const p = y * r.width + x;
+        const c = Math.round(a * 255);
+        if (c <= s.cover[p]!) continue;
+        s.cover[p] = c;
+        a = c / 255;
+      }
+      fn((y * r.width + x) * 4, a * b.opacity, base, x, y);
     }
   return rect;
 }
 
-function blendPixel(d: Uint8ClampedArray, i: number, r: number, g: number, b: number, a: number) {
-  d[i] = d[i]! + (r - d[i]!) * a;
-  d[i + 1] = d[i + 1]! + (g - d[i + 1]!) * a;
-  d[i + 2] = d[i + 2]! + (b - d[i + 2]!) * a;
+function blendPixel(d: Uint8ClampedArray, base: Uint8ClampedArray, i: number, r: number, g: number, b: number, a: number) {
+  d[i] = base[i]! + (r - base[i]!) * a;
+  d[i + 1] = base[i + 1]! + (g - base[i + 1]!) * a;
+  d[i + 2] = base[i + 2]! + (b - base[i + 2]!) * a;
   d[i + 3] = 255;
 }
 
 /** Points along a stroke segment, spaced by a fraction of the radius (continuous lines). */
 export function strokePoints(x0: number, y0: number, x1: number, y1: number, radius: number): Array<[number, number]> {
-  const step = Math.max(1, radius * 0.25);
+  const step = Math.max(0.5, radius * 0.25);
   const n = Math.max(1, Math.ceil(Math.hypot(x1 - x0, y1 - y0) / step));
   const out: Array<[number, number]> = [];
   for (let i = 1; i <= n; i++) out.push([x0 + ((x1 - x0) * i) / n, y0 + ((y1 - y0) * i) / n]);
@@ -212,31 +254,98 @@ export function floodFill(r: Raster, x: number, y: number, color: RGBA, toleranc
 
 const lum = (d: Uint8ClampedArray, i: number) => 0.299 * d[i]! + 0.587 * d[i + 1]! + 0.114 * d[i + 2]!;
 
+export interface TextMaskOptions {
+  /** Weak threshold: pixels darker than this may be text (the «порог» field). */
+  threshold: number;
+  /** Mask growth in px so anti-aliased edges are erased too. */
+  dilate: number;
+  /** Fraction of each box side skipped at the edges (bubble outline). */
+  inset: number;
+  /** Box rotation, degrees clockwise (ADR 0011). */
+  rotation?: number;
+}
+
 /**
- * Text mask for auto-clean: inside the box (slightly inset to skip the bubble outline) pixels darker than
- * `threshold` are text; the mask grows by `dilate` px so anti-aliased edges are erased too.
- * Writes 255 into `mask` (one byte per pixel); returns the touched rectangle.
+ * Text mask of one object for auto-clean (writes 255 into `mask`, one byte per pixel; returns the touched
+ * rectangle). Pixels are classified by hysteresis instead of a single threshold: a pixel darker than
+ * `threshold` counts only if its 8-connected dark region also holds «strong» pixels, much darker than the
+ * box background. Letters always have such a core; JPEG ringing and block noise next to letters only
+ * makes faint isolated specks, which no longer turn into stray (and then dilated) mask blobs. Faint pixels
+ * touching a letter (its anti-aliased edge) stay, so no part of a letter is lost.
  */
-export function textMask(r: Raster, box: Box, mask: Uint8Array, opts: { threshold: number; dilate: number; inset: number }): Rect | null {
-  const ix = Math.round(box.w * opts.inset);
-  const iy = Math.round(box.h * opts.inset);
-  const area = clipRect({ x: box.x + ix, y: box.y + iy, w: box.w - 2 * ix, h: box.h - 2 * iy }, r.width, r.height);
+export function textMask(r: Raster, box: Box, mask: Uint8Array, opts: TextMaskOptions): Rect | null {
+  const hw = box.w / 2 - box.w * opts.inset;
+  const hh = box.h / 2 - box.h * opts.inset;
+  if (hw <= 0 || hh <= 0) return null;
+  const cx = box.x + box.w / 2;
+  const cy = box.y + box.h / 2;
+  const rad = ((opts.rotation ?? 0) * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  const ex = Math.abs(hw * cos) + Math.abs(hh * sin);
+  const ey = Math.abs(hw * sin) + Math.abs(hh * cos);
+  const area = clipRect({ x: cx - ex, y: cy - ey, w: 2 * ex, h: 2 * ey }, r.width, r.height);
   if (!area) return null;
-  const core = new Uint8Array(area.w * area.h);
-  let any = false;
+  const n = area.w * area.h;
+  const L = new Float32Array(n).fill(-1); // -1 = outside the (rotated) box
+  const hist = new Uint32Array(256);
+  let count = 0;
   for (let y = 0; y < area.h; y++)
     for (let x = 0; x < area.w; x++) {
-      if (lum(r.data, ((area.y + y) * r.width + area.x + x) * 4) < opts.threshold) {
-        core[y * area.w + x] = 1;
-        any = true;
-      }
+      const dx = area.x + x + 0.5 - cx;
+      const dy = area.y + y + 0.5 - cy;
+      if (Math.abs(dx * cos + dy * sin) > hw || Math.abs(-dx * sin + dy * cos) > hh) continue;
+      const l = lum(r.data, ((area.y + y) * r.width + area.x + x) * 4);
+      L[y * area.w + x] = l;
+      hist[Math.min(255, Math.round(l))]!++;
+      count++;
     }
+  if (!count) return null;
+  // background = 90th percentile of the box (the bubble paper; robust to the text itself)
+  let acc = 0;
+  let bg = 255;
+  for (let v = 0; v < 256; v++) {
+    acc += hist[v]!;
+    if (acc >= count * 0.9) {
+      bg = v;
+      break;
+    }
+  }
+  const weak = Math.min(opts.threshold, bg - 12);
+  const strong = Math.min(weak - 40, bg - 90);
+  const cls = new Uint8Array(n); // 0 none, 1 weak, 2 strong
+  for (let k = 0; k < n; k++) if (L[k]! >= 0 && L[k]! < weak) cls[k] = L[k]! < strong ? 2 : 1;
+  const keep = new Uint8Array(n);
+  const stack: number[] = [];
+  let any = false;
+  for (let k = 0; k < n; k++) {
+    if (cls[k] !== 2 || keep[k]) continue;
+    any = true;
+    keep[k] = 1;
+    stack.push(k);
+    while (stack.length) {
+      const q = stack.pop()!;
+      const qx = q % area.w;
+      const qy = (q - qx) / area.w;
+      for (let yy = -1; yy <= 1; yy++)
+        for (let xx = -1; xx <= 1; xx++) {
+          const nx = qx + xx;
+          const ny = qy + yy;
+          if (nx < 0 || ny < 0 || nx >= area.w || ny >= area.h) continue;
+          const m = ny * area.w + nx;
+          if (cls[m] && !keep[m]) {
+            keep[m] = 1;
+            stack.push(m);
+          }
+        }
+    }
+  }
   if (!any) return null;
   const d = Math.max(0, Math.round(opts.dilate));
   const out = clipRect({ x: area.x - d, y: area.y - d, w: area.w + 2 * d, h: area.h + 2 * d }, r.width, r.height)!;
   for (let y = 0; y < area.h; y++)
     for (let x = 0; x < area.w; x++) {
-      if (!core[y * area.w + x]) continue;
+      if (!keep[y * area.w + x]) continue;
       for (let yy = -d; yy <= d; yy++)
         for (let xx = -d; xx <= d; xx++) {
           if (xx * xx + yy * yy > d * d) continue;
@@ -245,6 +354,91 @@ export function textMask(r: Raster, box: Box, mask: Uint8Array, opts: { threshol
           if (gx >= 0 && gy >= 0 && gx < r.width && gy < r.height) mask[gy * r.width + gx] = 255;
         }
     }
+  return out;
+}
+
+/**
+ * Residual inspection (a hint, not a guarantee): pixels of the clean darker than their 9x9
+ * neighbourhood mean by more than `sensitivity` levels, searched only where the raw had text (text masks
+ * of the objects, grown by 3 px). A single leftover pixel stands out against the local mean, so it is
+ * found too. Returns a per-pixel mask and the clusters (for markers visible at any zoom).
+ */
+export function findResiduals(
+  clean: Raster,
+  raw: Raster,
+  objects: Array<{ box: Box; rotation?: number }>,
+  opts: { sensitivity: number; threshold: number },
+): { mask: Uint8Array; clusters: Rect[]; pixels: number } {
+  const { width, height } = clean;
+  const zone = new Uint8Array(width * height);
+  for (const o of objects) textMask(raw, o.box, zone, { threshold: Math.min(250, opts.threshold + 40), dilate: 3, inset: 0, rotation: o.rotation ?? 0 });
+  const out = new Uint8Array(width * height);
+  const bounds = maskBounds(zone, width, height);
+  if (!bounds) return { mask: out, clusters: [], pixels: 0 };
+  const R = 4;
+  const area = clipRect({ x: bounds.x - R, y: bounds.y - R, w: bounds.w + 2 * R, h: bounds.h + 2 * R }, width, height)!;
+  const W = area.w + 1;
+  const sum = new Float64Array(W * (area.h + 1));
+  for (let y = 0; y < area.h; y++) {
+    let row = 0;
+    for (let x = 0; x < area.w; x++) {
+      row += lum(clean.data, ((area.y + y) * width + area.x + x) * 4);
+      sum[(y + 1) * W + x + 1] = sum[y * W + x + 1]! + row;
+    }
+  }
+  let pixels = 0;
+  for (let y = bounds.y; y < bounds.y + bounds.h; y++)
+    for (let x = bounds.x; x < bounds.x + bounds.w; x++) {
+      const p = y * width + x;
+      if (!zone[p]) continue;
+      const x0 = Math.max(area.x, x - R) - area.x;
+      const y0 = Math.max(area.y, y - R) - area.y;
+      const x1 = Math.min(area.x + area.w, x + R + 1) - area.x;
+      const y1 = Math.min(area.y + area.h, y + R + 1) - area.y;
+      const mean = (sum[y1 * W + x1]! - sum[y0 * W + x1]! - sum[y1 * W + x0]! + sum[y0 * W + x0]!) / ((x1 - x0) * (y1 - y0));
+      if (mean - lum(clean.data, p * 4) > opts.sensitivity) {
+        out[p] = 255;
+        pixels++;
+      }
+    }
+  return { mask: out, clusters: pixels ? clusterRects(out, width, height) : [], pixels };
+}
+
+/** Bounding boxes of regions of a mask; pixels closer than 4 px join one region. */
+function clusterRects(mask: Uint8Array, width: number, height: number): Rect[] {
+  const seen = new Uint8Array(mask.length);
+  const out: Rect[] = [];
+  const stack: number[] = [];
+  for (let p = 0; p < mask.length; p++) {
+    if (!mask[p] || seen[p]) continue;
+    let minX = width;
+    let minY = height;
+    let maxX = -1;
+    let maxY = -1;
+    seen[p] = 1;
+    stack.push(p);
+    while (stack.length) {
+      const q = stack.pop()!;
+      const qx = q % width;
+      const qy = (q - qx) / width;
+      if (qx < minX) minX = qx;
+      if (qx > maxX) maxX = qx;
+      if (qy < minY) minY = qy;
+      if (qy > maxY) maxY = qy;
+      for (let yy = -3; yy <= 3; yy++)
+        for (let xx = -3; xx <= 3; xx++) {
+          const nx = qx + xx;
+          const ny = qy + yy;
+          if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
+          const m = ny * width + nx;
+          if (mask[m] && !seen[m]) {
+            seen[m] = 1;
+            stack.push(m);
+          }
+        }
+    }
+    out.push({ x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 });
+  }
   return out;
 }
 

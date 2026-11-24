@@ -24,7 +24,7 @@ export interface LocalObject {
   /** An auto object the user changed: re-analysis keeps it. */
   touched: boolean;
   /** Read-only data from the web (docs/05 §4.5). */
-  web?: { flagged: boolean; comment: string; translation: string; state: string } | undefined;
+  web?: { flagged: boolean; comment: string; translation: string; state: string; text_ver?: number } | undefined;
   score?: number | undefined;
 }
 
@@ -42,6 +42,11 @@ export interface LocalPage {
   analyzed: boolean;
   /** markup_rev on the server after the last publish/download; null = never published. */
   server_markup_rev: number | null;
+  /**
+   * Clean and markup keys as they were on the server at the last publish / download / sync (ADR 0020):
+   * the base of the three-way comparison of «Синхронизировать». Missing in older workspaces.
+   */
+  base?: { clean?: string | undefined; markup?: string | undefined };
   /** Hash of the markup as last published, to show «изменена после публикации». */
   published_digest: string | null;
 }

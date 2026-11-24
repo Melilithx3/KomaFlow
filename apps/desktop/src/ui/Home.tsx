@@ -7,6 +7,7 @@ import { loadWorkspace, saveWorkspace, workspaceFromImages } from '../core/works
 import type { AppCtx } from './App.js';
 import type { Settings } from './session.js';
 import { LayoutSettings } from './LayoutSettings.js';
+import { SyncDialog } from './SyncDialog.js';
 
 interface Props {
   ctx: AppCtx;
@@ -23,6 +24,8 @@ export function Home({ ctx, onSettings, onLogin, onLogout, onOpen, onOpenSaved }
   const [saved, setSaved] = useState<Workspace[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState<Workspace | null>(null);
+  const [note, setNote] = useState<string | null>(null);
 
   useEffect(() => {
     void (async () => {
@@ -83,10 +86,28 @@ export function Home({ ctx, onSettings, onLogin, onLogout, onOpen, onOpenSaved }
               </button>{' '}
               <span className="muted">
                 {w.pages.length} стр.{w.server ? ` · глава ${w.server.chapter_number} на сервере` : ' · не опубликована'}
-              </span>
+              </span>{' '}
+              {user && (
+                <button className="tiny" onClick={() => (setNote(null), setSyncing(w))} title="Подтянуть с сервера клин и разметку (на выбор) и перевод">
+                  Синхронизировать
+                </button>
+              )}
             </li>
           ))}
         </ul>
+        {note && <p className="muted">{note}</p>}
+        {syncing && (
+          <SyncDialog
+            ctx={ctx}
+            ws={syncing}
+            onClose={() => setSyncing(null)}
+            onDone={(next, msg) => {
+              setSaved((list) => list.map((x) => (x.id === next.id ? next : x)));
+              setSyncing(null);
+              setNote(msg);
+            }}
+          />
+        )}
       </section>
 
       {user && <ServerChapters ctx={ctx} onOpen={onOpen} />}
