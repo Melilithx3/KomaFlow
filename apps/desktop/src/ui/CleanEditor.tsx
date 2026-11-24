@@ -70,8 +70,6 @@ export const roundSize = (v: number) => {
   return c < 10 ? Math.round(c * 10) / 10 : Math.round(c);
 };
 const sliderToSize = (pos: number) => roundSize(SIZE_MIN * Math.pow(SIZE_MAX / SIZE_MIN, pos / SLIDER_STEPS));
-/** Autosave delay after the last edit. */
-const AUTOSAVE_MS = 1500;
 
 const hexToRgba = (h: string): RGBA => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16), 255];
 const rgbaToHex = (c: RGBA) => `#${c.slice(0, 3).map((v) => v.toString(16).padStart(2, '0')).join('')}`;
@@ -122,7 +120,8 @@ export function CleanEditor(p: Props) {
   const residualCanvas = useRef<OffscreenCanvas | null>(null);
   const residualClusters = useRef<Rect[]>([]);
   const residualTimer = useRef(0);
-  const saveTimer = useRef(0);
+  /** Files this editor itself just bound to the page: their hash change must not reload the page. */
+  const selfSaved = useRef<{ pageId: string; clean: string | null; notes: string | null } | null>(null);
   const saving = useRef<Promise<boolean> | null>(null);
   const pan = useRef<{ sx: number; sy: number; vx: number; vy: number } | null>(null);
   const cursor = useRef<{ x: number; y: number } | null>(null);
@@ -296,6 +295,10 @@ export function CleanEditor(p: Props) {
 
   // ---------------------------------------------------------------- loading
   useEffect(() => {
+    // our own save changes the hashes: keep the view, zoom and undo history as they are
+    const own = selfSaved.current;
+    if (own && own.pageId === p.page.id && own.clean === (p.page.clean?.hash ?? null) && own.notes === (p.page.notes?.hash ?? null)) return;
+    selfSaved.current = null;
     let alive = true;
     setLoading(true);
     history.current.clear();
@@ -305,7 +308,6 @@ export function CleanEditor(p: Props) {
     dirty.current = false;
     notesDirty.current = false;
     stampSource.current = null;
-    clearTimeout(saveTimer.current);
     setSaveState({ kind: 'saved' });
     residualClusters.current = [];
     residualCanvas.current = null;
@@ -337,10 +339,10 @@ export function CleanEditor(p: Props) {
         vp.current = fitViewport(rw, { width: c.clientWidth, height: c.clientHeight });
         flush(fullRect(), true);
         updateResiduals(0);
-        // no clean yet: it starts as a copy of raw and is saved right away (raw itself is never changed)
+        // no clean yet: it starts as a copy of raw and is saved when leaving the page (raw itself is never changed)
         if (!pg.clean) {
           dirty.current = true;
-          void save();
+          setSaveState({ kind: 'pending' });
         }
       } catch (e) {
         p.setMessage(`Не удалось открыть страницу: ${e instanceof Error ? e.message : String(e)}`);
@@ -372,14 +374,19 @@ export function CleanEditor(p: Props) {
     if (!w || (!dirty.current && !notesDirty.current)) return true;
     const { ctx, store, page } = props.current;
     const wsId = store.get().ws.id;
-    clearTimeout(saveTimer.current);
     setSaveState({ kind: 'saving' });
+    const mark = (kind: 'clean' | 'notes', hash: string | null) => {
+      const cur = store.get().ws.pages.find((x) => x.id === page.id);
+      const base = selfSaved.current?.pageId === page.id ? selfSaved.current : { pageId: page.id, clean: cur?.clean?.hash ?? null, notes: cur?.notes?.hash ?? null };
+      selfSaved.current = { ...base, [kind]: hash };
+    };
     try {
       if (dirty.current) {
         dirty.current = false; // edits during the write mark it dirty again
         const bytes = await encodePng(w);
         const hash = sha256Hex(bytes);
         const path = await ctx.host.saveImage(wsId, hash, bytes, 'image/png');
+        mark('clean', hash);
         store.patch((ws) => withPageFile(ws, page.id, 'clean', { path, hash, width: w.width, height: w.height, mime: 'image/png' }));
       }
       const n = notes.current;
@@ -390,12 +397,15 @@ export function CleanEditor(p: Props) {
           const bytes = await encodePng(n);
           const hash = sha256Hex(bytes);
           const path = await ctx.host.saveImage(wsId, hash, bytes, 'image/png');
+          mark('notes', hash);
           store.patch((ws) => withPageFile(ws, page.id, 'notes', { path, hash, width: n.width, height: n.height, mime: 'image/png' }));
-        } else store.patch((ws) => withPageFile(ws, page.id, 'notes', null));
+        } else {
+          mark('notes', null);
+          store.patch((ws) => withPageFile(ws, page.id, 'notes', null));
+        }
       }
       const more = dirty.current || notesDirty.current;
       setSaveState({ kind: more ? 'pending' : 'saved' });
-      if (more) schedule();
       return true;
     } catch (e) {
       dirty.current = true;
@@ -411,10 +421,6 @@ export function CleanEditor(p: Props) {
     saving.current = saveNow().finally(() => (saving.current = null));
     return saving.current;
   }, [saveNow]);
-  const schedule = () => {
-    clearTimeout(saveTimer.current);
-    saveTimer.current = window.setTimeout(() => void save(), AUTOSAVE_MS);
-  };
   useImperativeHandle(p.handle, () => ({ save, dirty: () => dirty.current || notesDirty.current || !!saving.current }), [save]);
 
   /** Records a finished edit for the shared undo history. */
@@ -445,13 +451,11 @@ export function CleanEditor(p: Props) {
   const markNotesDirty = () => {
     notesDirty.current = true;
     setSaveState({ kind: 'pending' });
-    schedule();
   };
 
   const markDirty = () => {
     dirty.current = true;
     setSaveState({ kind: 'pending' });
-    schedule();
     updateResiduals();
   };
 
@@ -789,8 +793,7 @@ export function CleanEditor(p: Props) {
     draw();
   }, [residuals, sensitivity, mp.threshold, p.page.objects, updateResiduals, draw]);
   useEffect(draw, [showRaw, draw]);
-  // pending edits are written when the editor goes away (page or mode switch saves explicitly too)
-  useEffect(() => () => clearTimeout(saveTimer.current), []);
+
 
   const lamaOff = lamaBlocker(p.ctx.caps);
   const updateMp = (patch: Partial<MaskParams>) => {
@@ -923,7 +926,7 @@ export function CleanEditor(p: Props) {
           className={`save-state ${saveState.kind}`}
           disabled={saveState.kind === 'saved' || saveState.kind === 'saving'}
           onClick={() => void save()}
-          title={saveState.kind === 'error' ? `Ошибка: ${saveState.error}. Нажмите, чтобы повторить` : 'Сохраняется автоматически; Ctrl+S — сейчас'}
+          title={saveState.kind === 'error' ? `Ошибка: ${saveState.error}. Нажмите, чтобы повторить` : 'Сохраняется при смене страницы или режима, публикации и выходе; Ctrl+S — сейчас'}
         >
           {{ saved: 'Сохранено', pending: 'Сохранить', saving: 'Сохранение…', error: 'Ошибка — повторить' }[saveState.kind]}
         </button>
