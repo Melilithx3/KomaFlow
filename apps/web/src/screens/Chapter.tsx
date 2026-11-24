@@ -57,6 +57,10 @@ export function ChapterScreen() {
             {chapter.title ? <span className="muted"> · {chapter.title}</span> : null}
           </h1>
         </div>
+        <div className="row wrap">
+        <Link className="button" to={`/chapters/${chapter.id}/review/clean`} title={t.review.tabHint}>
+          {t.review.tab}
+        </Link>
         <AiJson
           pageIds={pages.map((p) => p.id)}
           chapterNumber={chapter.number}
@@ -64,6 +68,7 @@ export function ChapterScreen() {
           targetLang={project.target_lang}
           fileName={`komaflow-${chapter.number}.json`}
         />
+        </div>
       </div>
       <ExportPanel chapterId={chapter.id} pageIdx={idxMap} />
       <div className="row wrap filters" role="group" aria-label="Фильтр">

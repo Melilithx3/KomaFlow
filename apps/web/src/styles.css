@@ -341,3 +341,32 @@ input[type='color'] { padding: 0.15rem; height: 2.3rem; width: 100%; cursor: poi
   .progress { grid-template-columns: 7rem 1fr; }
   .grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 0.6rem; }
 }
+
+/* ---------------------------------------------------------------- «Редакция» (ADR 0021) */
+a.button { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.4rem 0.8rem; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--panel-2); color: var(--text); text-decoration: none; }
+.review-tabs { margin: 0.4rem 0 0.8rem; }
+.review-tabs a { padding: 0.4rem 0.9rem; border: 1px solid var(--line-strong); color: var(--text); text-decoration: none; background: var(--panel-2); }
+.review-tabs a + a { margin-left: -1px; }
+.review-tabs a:first-child { border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
+.review-tabs a:last-child { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
+.review-tabs a.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.review-body { display: flex; flex-direction: column; gap: 0.7rem; }
+.review-strip { display: flex; gap: 0.4rem; overflow-x: auto; list-style: none; margin: 0; padding: 0 0 0.3rem; }
+.review-strip button { display: flex; flex-direction: column; align-items: center; gap: 0.15rem; padding: 0.25rem; min-height: 0; }
+.review-strip button[aria-pressed='true'] { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.review-strip img { width: 56px; height: 78px; object-fit: cover; border-radius: 4px; background: #fff; }
+.marks-review { display: flex; flex-direction: column; gap: 0.6rem; }
+.marks-review .viewer-toolbar { flex-wrap: wrap; gap: 0.45rem; }
+.marks-stage { position: relative; align-self: center; width: 100%; max-width: 900px; line-height: 0; }
+.marks-stage img { width: 100%; height: auto; background: #fff; user-select: none; }
+.marks-stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: pan-y pinch-zoom; }
+.marks-stage.drawing canvas { touch-action: none; cursor: crosshair; }
+.review-comment { display: flex; flex-direction: column; gap: 0.3rem; max-width: 900px; width: 100%; align-self: center; }
+.review-comment textarea { width: 100%; }
+.conflict-box { border: 1px solid #f59e0b; background: #f59e0b14; border-radius: 8px; padding: 0.5rem 0.7rem; }
+.review-page { container-type: inline-size; }
+.review-page summary { cursor: pointer; display: flex; gap: 0.6rem; align-items: center; padding: 0.2rem 0; }
+.review-page[open] summary { margin-bottom: 0.4rem; }
+@media (max-width: 700px) {
+  .review-strip img { width: 44px; height: 62px; }
+}

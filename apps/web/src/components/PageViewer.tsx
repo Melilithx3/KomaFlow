@@ -17,6 +17,8 @@ export interface PageViewerHandle {
   centerOn(id: string): void;
 }
 
+const BOXES_KEY = 'komaflow:viewer-boxes';
+
 interface Props {
   width: number;
   height: number;
@@ -39,6 +41,22 @@ export const PageViewer = memo(function PageViewer(p: Props) {
   const [mode, setMode] = useState<'raw' | 'clean'>('raw');
   const [showNotes, setShowNotes] = useState(false);
   const [numbersOnClean, setNumbersOnClean] = useState(false);
+  /** Box outlines on/off: display only, remembered on this device. */
+  const [showBoxes, setShowBoxesState] = useState(() => {
+    try {
+      return localStorage.getItem(BOXES_KEY) !== '0';
+    } catch {
+      return true;
+    }
+  });
+  const setShowBoxes = (v: boolean) => {
+    setShowBoxesState(v);
+    try {
+      localStorage.setItem(BOXES_KEY, v ? '1' : '0');
+    } catch {
+      // private mode: keep it for this page only
+    }
+  };
   const [vp, setVp] = useState<Viewport>({ scale: 0.2, x: 0, y: 0 });
   const vpRef = useRef(vp);
   vpRef.current = vp;
@@ -159,7 +177,7 @@ export const PageViewer = memo(function PageViewer(p: Props) {
   };
 
   const img = mode === 'clean' && p.cleanHash ? p.cleanHash : p.rawHash;
-  const showNumbers = mode === 'raw' || numbersOnClean;
+  const showNumbers = showBoxes && (mode === 'raw' || numbersOnClean);
   // label size in image px so that it is ~22 px on screen, but not absurd when zoomed out
   const labelSize = Math.min(Math.max(22 / vp.scale, 14), Math.min(p.width, p.height) * 0.06);
 
@@ -179,7 +197,10 @@ export const PageViewer = memo(function PageViewer(p: Props) {
             <input type="checkbox" checked={showNotes} onChange={(e) => setShowNotes(e.target.checked)} /> {t.page.notes}
           </label>
         )}
-        {mode === 'clean' && (
+        <label className="check" title={t.page.boxesHint}>
+          <input type="checkbox" checked={showBoxes} onChange={(e) => setShowBoxes(e.target.checked)} /> {t.page.boxes}
+        </label>
+        {mode === 'clean' && showBoxes && (
           <label className="check">
             <input type="checkbox" checked={numbersOnClean} onChange={(e) => setNumbersOnClean(e.target.checked)} /> {t.page.numbers}
           </label>
@@ -188,7 +209,9 @@ export const PageViewer = memo(function PageViewer(p: Props) {
         <button className="icon-btn" aria-label={t.page.zoomOut} title={t.page.zoomOut} onClick={() => zoomBy(1 / 1.25)}>
           <Icon name="zoomOut" />
         </button>
-        <span className="zoom-label">{Math.round(vp.scale * 100)}%</span>
+        <span className="zoom-label" title={t.page.viewerHint}>
+          {Math.round(vp.scale * 100)}%
+        </span>
         <button className="icon-btn" aria-label={t.page.zoomIn} title={t.page.zoomIn} onClick={() => zoomBy(1.25)}>
           <Icon name="zoomIn" />
         </button>
@@ -199,7 +222,6 @@ export const PageViewer = memo(function PageViewer(p: Props) {
       <div
         ref={wrap}
         className="viewer-canvas"
-        title={t.page.viewerHint}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}

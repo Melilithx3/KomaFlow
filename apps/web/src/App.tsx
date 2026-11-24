@@ -9,6 +9,7 @@ import { Icon } from './components/Icon.js';
 import { LoginScreen } from './screens/Login.js';
 import { ProjectsScreen } from './screens/Projects.js';
 import { ChapterScreen } from './screens/Chapter.js';
+import { ReviewScreen } from './screens/Review.js';
 import { PageScreen } from './screens/Page.js';
 import { SettingsScreen } from './screens/Settings.js';
 
@@ -67,6 +68,7 @@ function Authed() {
         <Route path="/" element={<ProjectsScreen />} />
         <Route path="/projects/:projectId" element={<ProjectsScreen />} />
         <Route path="/chapters/:chapterId" element={<ChapterScreen />} />
+        <Route path="/chapters/:chapterId/review/:tab?" element={<ReviewScreen />} />
         <Route path="/pages/:pageId" element={<PageScreen />} />
         <Route path="/settings" element={<SettingsScreen />} />
         <Route path="*" element={<p className="center">{t.notFound}</p>} />

@@ -53,3 +53,17 @@ export async function api<T>(method: string, path: string, body?: unknown): Prom
 }
 
 export const blobUrl = (hash: string) => `${API_PREFIX}/blobs/${hash}`;
+
+/** Uploads a file to the content-addressed blob store (typed pages, review marks; ADR 0021). */
+export async function uploadBlob(hash: string, bytes: Uint8Array, mime: string): Promise<void> {
+  const res = await fetch(`${API_PREFIX}/blobs/${hash}`, {
+    method: 'PUT',
+    credentials: 'same-origin',
+    headers: { 'content-type': mime, 'x-komaflow-client': 'web' },
+    body: bytes as BodyInit,
+  });
+  if (!res.ok) {
+    const parsed = ErrorBody.safeParse(await res.json().catch(() => null));
+    throw new HttpError(res.status, parsed.success ? parsed.data.error.code : 'INTERNAL_ERROR', parsed.success ? parsed.data.error.message : `HTTP ${res.status}`, undefined);
+  }
+}
