@@ -155,6 +155,7 @@ export function pageSummaries(ctx: Ctx, chapterId: string, userId: string): Page
       markup_rev: p.markup_rev,
       rev: p.rev,
       typed: st.typed,
+      typed_hash: p.typed_hash ?? null,
       has_clean: st.has_clean,
       counts: c,
       flagged: rows.reduce((n, r) => n + Number(r.flagged ?? 0), 0),

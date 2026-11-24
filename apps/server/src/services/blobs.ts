@@ -124,7 +124,8 @@ export function openBlob(ctx: Ctx, hash: string): { row: BlobRow; stream: Readab
 export function unreferencedBlobs(ctx: Ctx): BlobRow[] {
   return ctx.db.all<BlobRow>(
     `SELECT * FROM blobs b WHERE NOT EXISTS (
-       SELECT 1 FROM pages p WHERE p.raw_hash = b.hash OR p.clean_hash = b.hash OR p.notes_hash = b.hash OR p.thumb_hash = b.hash)`,
+       SELECT 1 FROM pages p WHERE p.raw_hash = b.hash OR p.clean_hash = b.hash OR p.notes_hash = b.hash OR p.thumb_hash = b.hash OR p.typed_hash = b.hash)
+       AND NOT EXISTS (SELECT 1 FROM page_reviews r WHERE r.marks_hash = b.hash)`,
   );
 }
 

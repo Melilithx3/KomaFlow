@@ -6,12 +6,27 @@ export interface Size {
 }
 
 export function isValidBox(b: Box): boolean {
-  return [b.x, b.y, b.w, b.h].every(Number.isInteger) && b.x >= 0 && b.y >= 0 && b.w >= 1 && b.h >= 1;
+  return [b.x, b.y, b.w, b.h].every(Number.isInteger) && b.w >= 1 && b.h >= 1;
 }
 
 /** Box lies entirely within the page. */
 export function boxInsidePage(b: Box, page: Size): boolean {
-  return isValidBox(b) && b.x + b.w <= page.width && b.y + b.h <= page.height;
+  return isValidBox(b) && b.x >= 0 && b.y >= 0 && b.x + b.w <= page.width && b.y + b.h <= page.height;
+}
+
+/**
+ * Sanity limit for stored geometry (ADR 0018): a box may stick out of the page or lie outside it, e.g. a
+ * rotated box at the page edge, but stays within two page sizes around the page.
+ */
+export function boxWithinReach(b: Box, page: Size): boolean {
+  return isValidBox(b) && b.x >= -2 * page.width && b.y >= -2 * page.height && b.x + b.w <= 3 * page.width && b.y + b.h <= 3 * page.height;
+}
+
+/** Integer pixels, at least 1x1, no clamping into the page (manual geometry, ADR 0018). */
+export function roundBox(b: Box): Box {
+  const x0 = Math.round(b.x);
+  const y0 = Math.round(b.y);
+  return { x: x0, y: y0, w: Math.max(1, Math.round(b.x + b.w) - x0), h: Math.max(1, Math.round(b.y + b.h) - y0) };
 }
 
 /** Rounds to integer pixels and clamps into the page; keeps at least 1x1. */

@@ -5,11 +5,15 @@ import {
   type ObjectDTO,
   type PageDetailResponse,
   type PageDTO,
+  type PageReviewDTO,
   type PatchObjectRequest,
+  type PutReviewRequest,
+  type ReviewKind,
   type TextData,
   type TextField,
 } from '@komaflow/contract';
 import { iso, type Ctx } from '../context.js';
+import { getBlob } from './blobs.js';
 import { objectDTO, pageDTO, parseSettings, type ObjectRow, type PageRow } from './rows.js';
 import { getChapterRow, getProjectRow } from './catalog.js';
 import { userDTO, type UserRow } from './users.js';
@@ -45,6 +49,7 @@ export function pageDetail(ctx: Ctx, pageId: string, userId: string): PageDetail
     pageId,
   );
   return {
+    reviews: pageReviews(ctx, pageId),
     page: pageDTO(page),
     objects: objs.filter((o) => o.deleted === 0).map(objectDTO),
     deleted_objects: objs.filter((o) => o.deleted === 1).map(objectDTO),
@@ -65,6 +70,71 @@ export function markSeen(ctx: Ctx, pageId: string, userId: string, markupRev: nu
     pageId,
     rev,
   );
+}
+
+/** Reviews of a page; both kinds are always listed (ver 0 = nothing saved yet). */
+export function pageReviews(ctx: Ctx, pageId: string): PageReviewDTO[] {
+  const rows = ctx.db.all<{ kind: ReviewKind; marks_hash: string | null; comment: string; ver: number; updated_at: string | null; display_name: string | null }>(
+    `SELECT r.kind, r.marks_hash, r.comment, r.ver, r.updated_at, u.display_name
+       FROM page_reviews r LEFT JOIN users u ON u.id = r.updated_by WHERE r.page_id = ?`,
+    pageId,
+  );
+  return (['clean', 'type'] as const).map((kind) => {
+    const r = rows.find((x) => x.kind === kind);
+    return r
+      ? { kind, marks_hash: r.marks_hash, comment: r.comment, ver: r.ver, updated_at: r.updated_at, updated_by_name: r.display_name }
+      : { kind, marks_hash: null, comment: '', ver: 0, updated_at: null, updated_by_name: null };
+  });
+}
+
+/**
+ * Saves the editorial review of the clean or the typed page (ADR 0021). Marks are a separate image, they
+ * never touch the clean / typed image. Stale `base_ver` → REVISION_CONFLICT with the current review.
+ */
+export function putReview(ctx: Ctx, pageId: string, kind: ReviewKind, userId: string, req: PutReviewRequest): PageReviewDTO {
+  return ctx.db.tx(() => {
+    const page = getPageRow(ctx, pageId);
+    const cur = pageReviews(ctx, pageId).find((r) => r.kind === kind)!;
+    if (req.base_ver !== cur.ver) throw new ApiError('REVISION_CONFLICT', 'the review was changed meanwhile', { review: cur });
+    if (req.marks_hash) {
+      const b = getBlob(ctx, req.marks_hash);
+      if (!b) throw new ApiError('BLOBS_MISSING', 'upload the marks image first', { missing: [req.marks_hash] });
+      if (b.width !== page.width || b.height !== page.height) {
+        throw new ApiError('SIZE_MISMATCH', `marks are ${b.width}x${b.height}, page is ${page.width}x${page.height}`);
+      }
+    }
+    if (req.marks_hash === cur.marks_hash && req.comment === cur.comment) return cur;
+    ctx.db.run(
+      `INSERT INTO page_reviews (page_id, kind, marks_hash, comment, ver, updated_at, updated_by) VALUES (?, ?, ?, ?, 1, ?, ?)
+       ON CONFLICT (page_id, kind) DO UPDATE SET marks_hash = excluded.marks_hash, comment = excluded.comment, ver = ver + 1,
+         updated_at = excluded.updated_at, updated_by = excluded.updated_by`,
+      pageId,
+      kind,
+      req.marks_hash,
+      req.comment,
+      iso(ctx.now()),
+      userId,
+    );
+    ctx.db.run('UPDATE pages SET rev = rev + 1 WHERE id = ?', pageId);
+    return pageReviews(ctx, pageId).find((r) => r.kind === kind)!;
+  });
+}
+
+/** Binds an uploaded typed page image and sets «затайплена» (the image is the proof). */
+export function setTypedImage(ctx: Ctx, pageId: string, userId: string, hash: string): PageDTO {
+  return ctx.db.tx(() => {
+    const page = getPageRow(ctx, pageId);
+    if (!getBlob(ctx, hash)) throw new ApiError('BLOBS_MISSING', 'upload the typed page first', { missing: [hash] });
+    if (page.typed_hash === hash && page.typed_at !== null) return pageDTO(page);
+    ctx.db.run(
+      'UPDATE pages SET typed_hash = ?, typed_at = COALESCE(typed_at, ?), typed_by = COALESCE(typed_by, ?), rev = rev + 1 WHERE id = ?',
+      hash,
+      iso(ctx.now()),
+      userId,
+      pageId,
+    );
+    return pageDTO(getPageRow(ctx, pageId));
+  });
 }
 
 export function setTyped(ctx: Ctx, pageId: string, userId: string, typed: boolean): PageDTO {

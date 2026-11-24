@@ -4,7 +4,9 @@ import {
   autoReadingOrder,
   boxInsidePage,
   canonicalJson,
+  boxWithinReach,
   clampBox,
+  roundBox,
   insetBox,
   readImageHeader,
   sha256Hex,
@@ -66,6 +68,10 @@ describe('geometry', () => {
   it('clamps boxes', () => {
     expect(clampBox({ x: -10, y: 190, w: 50, h: 50 }, page)).toEqual({ x: 0, y: 190, w: 40, h: 10 });
     expect(clampBox({ x: 150, y: 10, w: 5, h: 5 }, page)).toEqual({ x: 99, y: 10, w: 1, h: 5 });
+    // manual geometry is not clamped (ADR 0018): a rotated box may stand at or beyond the edge
+    expect(roundBox({ x: -30.4, y: 180.6, w: 60, h: 40 })).toEqual({ x: -30, y: 181, w: 60, h: 40 });
+    expect(boxWithinReach({ x: -150, y: -10, w: 120, h: 20 }, page)).toBe(true);
+    expect(boxWithinReach({ x: -250, y: 0, w: 10, h: 10 }, page)).toBe(false);
   });
   it('insets boxes', () => {
     expect(insetBox({ x: 10, y: 10, w: 100, h: 50 }, 0.1)).toEqual({ x: 20, y: 15, w: 80, h: 40 });

@@ -1,6 +1,6 @@
 import {
   ApiError,
-  boxInsidePage,
+  boxWithinReach,
   diffMarkup,
   type SourceConflict,
   type SyncPage,
@@ -81,9 +81,9 @@ function validateShape(req: SyncRequest): void {
       const path = `pages.${pi}.objects.${oi}`;
       if (objIds.has(o.id)) issues.push({ path: `${path}.id`, message: 'duplicate object id' });
       objIds.add(o.id);
-      if (!boxInsidePage(o.box, size)) issues.push({ path: `${path}.box`, message: 'box must lie inside the page' });
-      if (o.text_box && !boxInsidePage(o.text_box, size)) {
-        issues.push({ path: `${path}.text_box`, message: 'text_box must lie inside the page' });
+      if (!boxWithinReach(o.box, size)) issues.push({ path: `${path}.box`, message: 'box is too far outside the page' });
+      if (o.text_box && !boxWithinReach(o.text_box, size)) {
+        issues.push({ path: `${path}.text_box`, message: 'text_box is too far outside the page' });
       }
     });
   });

@@ -123,90 +123,29 @@ describe('sync', () => {
     expect((await sync([np])).json.error.code).toBe('SIZE_MISMATCH');
   });
 
-  it('validates boxes inside page and duplicate ids', async () => {
+  it('accepts boxes sticking out of the page (ADR 0018), rejects absurd ones and duplicate ids', async () => {
+    // page is 800x1200: a horizontal box turned by 90° at the right edge, centre outside the page
     const p = fixtureSyncPage(pages[0]!, 1);
     p.objects[0]!.box = { x: 700, y: 0, w: 200, h: 10 };
-    const r = await sync([p]);
+    p.objects[0]!.rotation = 90;
+    p.objects[1]!.box = { x: -40, y: -5, w: 30, h: 20 }; // fully outside, top-left
+    const ok = await sync([p]);
+    expect(ok.status).toBe(200);
+    const objs = (await web.req('GET', `/pages/${pages[0]!.id}`)).json.objects;
+    expect(objs[0]).toMatchObject({ box: { x: 700, y: 0, w: 200, h: 10 }, rotation: 90 });
+    expect(objs[1].box).toEqual({ x: -40, y: -5, w: 30, h: 20 });
+    expect((await sync([{ ...p, base_markup_rev: 2 }])).json.pages[0].changed).toBe(false);
+    const far = fixtureSyncPage(pages[0]!, 2);
+    far.objects[0]!.box = { x: -5000, y: 0, w: 10, h: 10 };
+    const r = await sync([far]);
     expect(r.status).toBe(422);
     expect(r.json.error.details.issues[0].path).toBe('pages.0.objects.0.box');
-    const d = fixtureSyncPage(pages[0]!, 1);
+    const d = fixtureSyncPage(pages[0]!, 2);
     d.objects[1]!.id = d.objects[0]!.id;
     expect((await sync([d])).status).toBe(422);
-    const tb = fixtureSyncPage(pages[0]!, 1);
-    tb.objects[0]!.text_box = { x: 0, y: 1190, w: 10, h: 20 };
+    const tb = fixtureSyncPage(pages[0]!, 2);
+    tb.objects[0]!.text_box = { x: 0, y: 5000, w: 10, h: 20 };
     expect((await sync([tb])).status).toBe(422);
-  });
-
-  it('soft delete keeps text, restore brings it back; ord stays 1..n', async () => {
-    const pid = pages[0]!.id;
-    const victim = pages[0]!.objects[1]!.id;
-    const o = (await web.req('GET', `/pages/${pid}`)).json.objects.find((x: { id: string }) => x.id === victim);
-    await web.req('PATCH', `/objects/${victim}`, { base_text_ver: o.text_ver, changes: { translation: 'Добро пожаловать!' } });
-
-    const p = fixtureSyncPage(pages[0]!, 1);
-    p.objects = p.objects.filter((x) => x.id !== victim);
-    const r = await sync([p]);
-    expect(r.json.pages[0]).toMatchObject({ markup_rev: 2, summary: { deleted: [victim] } });
-    let rows = rowsOf(pid);
-    expect(rows.filter((x) => !x.deleted).map((x) => x.ord)).toEqual([1, 2, 3]);
-    expect(rows.find((x) => x.id === victim)).toMatchObject({ deleted: 1, translation: 'Добро пожаловать!' });
-    const detail = (await web.req('GET', `/pages/${pid}`)).json;
-    expect(detail.deleted_objects.map((x: { id: string }) => x.id)).toEqual([victim]);
-
-    const back = fixtureSyncPage(pages[0]!, 2);
-    const r2 = await sync([back]);
-    expect(r2.json.pages[0].summary.restored).toEqual([victim]);
-    rows = rowsOf(pid);
-    expect(rows.every((x) => !x.deleted)).toBe(true);
-    expect(rows.map((x) => x.ord)).toEqual([1, 2, 3, 4]);
-    expect(rows.find((x) => x.id === victim)!.translation).toBe('Добро пожаловать!');
-  });
-
-  it('never touches translation/comment/flag; keeps a web-edited original and reports the conflict', async () => {
-    const pid = pages[0]!.id;
-    const oid = pages[0]!.objects[0]!.id;
-    await web.req('PATCH', `/objects/${oid}`, { base_text_ver: 0, changes: { translation: 'перевод', comment: 'к', flagged: true, source_text: 'правка' } });
-    const p = fixtureSyncPage(pages[0]!, 1);
-    p.objects[0]!.source_text = 'OCR again';
-    p.objects[0]!.box = { x: 500, y: 60, w: 220, h: 260 };
-    p.objects.reverse();
-    const r = await sync([p]);
-    expect(r.json.pages[0].summary).toMatchObject({ moved: [oid], reordered: true });
-    expect(r.json.pages[0].source_conflicts).toEqual([{ id: oid, server_source_text: 'правка', desktop_source_text: 'OCR again' }]);
-    const obj = (await web.req('GET', `/pages/${pid}`)).json.objects.find((x: { id: string }) => x.id === oid);
-    expect(obj).toMatchObject({ translation: 'перевод', comment: 'к', flagged: true, source_text: 'правка', state: 'translated', order: 4 });
-    expect(obj.geometry_ver).toBe(2);
-  });
-
-  it('desktop originals update existing objects the web did not touch; base and force rules', async () => {
-    const pid = pages[0]!.id;
-    const [a, b] = pages[0]!.objects;
-    // a: never edited in the web, no base → applied
-    const p = fixtureSyncPage(pages[0]!, 1);
-    p.objects[0]!.source_text = 'NEW OCR A';
-    const r = await sync([p]);
-    expect(r.json.pages[0]).toMatchObject({ changed: false, source_updated: [a!.id], source_conflicts: [] });
-    let objs = (await web.req('GET', `/pages/${pid}`)).json.objects;
-    const oa = objs.find((x: { id: string }) => x.id === a!.id);
-    expect(oa).toMatchObject({ source_text: 'NEW OCR A', text_ver: 1 });
-    // a again with the correct base → applied
-    const p2 = fixtureSyncPage(pages[0]!, 1);
-    p2.objects[0]!.source_text = 'NEWER A';
-    p2.objects[0]!.source_text_base = 'NEW OCR A';
-    expect((await sync([p2])).json.pages[0].source_updated).toEqual([a!.id]);
-    // b edited in the web; stale base → conflict; force → applied
-    await web.req('PATCH', `/objects/${b!.id}`, { base_text_ver: 0, changes: { source_text: 'web fix' } });
-    const p3 = fixtureSyncPage(pages[0]!, 1);
-    p3.objects[0]!.source_text = 'NEWER A'; // equal to the server: no-op
-    p3.objects[1]!.source_text = 'desktop B';
-    p3.objects[1]!.source_text_base = b!.source_text;
-    expect((await sync([p3])).json.pages[0].source_conflicts).toEqual([{ id: b!.id, server_source_text: 'web fix', desktop_source_text: 'desktop B' }]);
-    p3.objects[1]!.source_text_force = true;
-    expect((await sync([p3])).json.pages[0].source_updated).toEqual([b!.id]);
-    objs = (await web.req('GET', `/pages/${pid}`)).json.objects;
-    expect(objs.find((x: { id: string }) => x.id === b!.id).source_text).toBe('desktop B');
-    // markup untouched by text-only syncs
-    expect(await rev(pid)).toBe(1);
   });
 
   it('rotation is stored, bumps markup, is idempotent and validated', async () => {

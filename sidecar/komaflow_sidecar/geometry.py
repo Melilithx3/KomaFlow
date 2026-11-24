@@ -69,7 +69,10 @@ def crop_object(im, box: dict[str, int], rotation: float, padding: int):
 
     w, h = im.size
     if not rotation:
-        return im.crop(crop_rect(box, padding, w, h))
+        l, t, r, b = crop_rect(box, padding, w, h)
+        if r <= l or b <= t:  # box fully outside the page (ADR 0018): nothing to read
+            return Image.new("RGB", (max(1, box["w"]), max(1, box["h"])), (255, 255, 255))
+        return im.crop((l, t, r, b))
     cx = box["x"] + box["w"] / 2
     cy = box["y"] + box["h"] / 2
     upright = im.rotate(rotation, resample=Image.Resampling.BICUBIC, center=(cx, cy), fillcolor=(255, 255, 255))

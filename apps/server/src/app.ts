@@ -7,7 +7,7 @@ import fastifyCookie from '@fastify/cookie';
 import fastifyStatic from '@fastify/static';
 import type { z } from 'zod';
 import * as A from '@komaflow/contract';
-import { ApiError, API_PREFIX, CLIENT_HEADER, SESSION_COOKIE, Sha256 } from '@komaflow/contract';
+import { ApiError, API_PREFIX, CLIENT_HEADER, ReviewKind, SESSION_COOKIE, Sha256 } from '@komaflow/contract';
 import { buildOpenApi } from '@komaflow/contract/openapi';
 import type { ImageCodec } from '@komaflow/psd';
 import { LoginLimiter } from './auth/rate-limit.js';
@@ -23,7 +23,7 @@ import {
   updateProject,
 } from './services/catalog.js';
 import { createExport, exportStatus, ExportWorker, getExport, listExports, openExportFile } from './services/exports.js';
-import { markSeen, pageDetail, patchObject, setTyped } from './services/pages.js';
+import { markSeen, pageDetail, patchObject, putReview, setTyped, setTypedImage } from './services/pages.js';
 import { syncChapter } from './services/sync.js';
 import {
   authenticate,
@@ -240,13 +240,14 @@ export function buildApp(ctx: Ctx, opts: AppOptions): App {
   });
 
   // ------------------------------------------------------------ blobs
+  // blobs: any client (the web uploads typed pages and review marks, ADR 0021); binding raw/clean stays in desktop sync
   app.post(`${P}/blobs/check`, async (req) => {
-    desktop(auth(req));
+    auth(req);
     const body = parse(A.BlobsCheckRequest, req.body);
     return { missing: missingBlobs(ctx, body.hashes) };
   });
   app.put(`${P}/blobs/:sha256`, async (req, reply) => {
-    desktop(auth(req));
+    auth(req);
     const hash = (req.params as { sha256: string }).sha256;
     if (!Sha256.safeParse(hash).success) throw new ApiError('VALIDATION_ERROR', 'path must be a lower-case sha256');
     const declared = Number(req.headers['content-length'] ?? 0);
@@ -289,6 +290,16 @@ export function buildApp(ctx: Ctx, opts: AppOptions): App {
   app.put(`${P}/pages/:id/typed`, async (req) => {
     const a = auth(req);
     return { page: setTyped(ctx, idParam(req), a.user.id, parse(A.TypedRequest, req.body).typed) };
+  });
+  app.put(`${P}/pages/:id/reviews/:kind`, async (req) => {
+    const a = auth(req);
+    const kind = ReviewKind.safeParse((req.params as { kind: string }).kind);
+    if (!kind.success) throw new ApiError('NOT_FOUND', 'review kind is clean or type');
+    return { review: putReview(ctx, idParam(req), kind.data, a.user.id, parse(A.PutReviewRequest, req.body)) };
+  });
+  app.put(`${P}/pages/:id/typed-image`, async (req) => {
+    const a = auth(req);
+    return { page: setTypedImage(ctx, idParam(req), a.user.id, parse(A.TypedImageRequest, req.body).hash) };
   });
   app.patch(`${P}/objects/:id`, async (req) => {
     const a = auth(req);

@@ -42,6 +42,7 @@ export interface PageRow {
   rev: number;
   typed_by: string | null;
   typed_at: string | null;
+  typed_hash: string | null;
   created_at: string;
 }
 
@@ -110,6 +111,7 @@ export const pageDTO = (r: PageRow): PageDTO => ({
   typed: r.typed_at !== null,
   typed_by: r.typed_by,
   typed_at: r.typed_at,
+  typed_hash: r.typed_hash ?? null,
 });
 
 export const objBox = (r: ObjectRow): Box => ({ x: r.x, y: r.y, w: r.w, h: r.h });

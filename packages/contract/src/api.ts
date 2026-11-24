@@ -1,5 +1,16 @@
 import { z } from 'zod';
-import { Box, Rotation, ClientKind, Id, LIMITS, ObjectType, ReadingDirection, Sha256, TranslationState, MAX_SIDE_PX } from './common.js';
+import {
+  Box,
+  Rotation,
+  ClientKind,
+  Id,
+  LIMITS,
+  ObjectType,
+  ReadingDirection,
+  Sha256,
+  TranslationState,
+  MAX_SIDE_PX,
+} from './common.js';
 import {
   ChapterDTO,
   ChapterListItem,
@@ -13,6 +24,7 @@ import {
   ProjectDTO,
   SessionDTO,
   UserDTO,
+  PageReviewDTO,
 } from './dto.js';
 import { ProjectSettings } from './settings.js';
 
@@ -124,7 +136,11 @@ export type SyncPage = z.infer<typeof SyncPage>;
 
 export const SyncRequest = z.strictObject({ pages: z.array(SyncPage).min(1).max(1000) });
 export type SyncRequest = z.infer<typeof SyncRequest>;
-export const SourceConflict = z.object({ id: Id, server_source_text: z.string(), desktop_source_text: z.string() });
+export const SourceConflict = z.object({
+  id: Id,
+  server_source_text: z.string(),
+  desktop_source_text: z.string(),
+});
 export type SourceConflict = z.infer<typeof SourceConflict>;
 export const SyncResponse = z.object({
   pages: z.array(
@@ -150,8 +166,23 @@ export const PageDetailResponse = z.object({
   revisions: z.array(MarkupRevisionDTO),
   project_settings: ProjectSettings,
   seen_markup_rev: z.number().int().nullable(),
+  /** Both kinds, always present (ver 0 = nothing yet). */
+  reviews: z.array(PageReviewDTO),
 });
 export type PageDetailResponse = z.infer<typeof PageDetailResponse>;
+
+/** PUT /pages/{id}/reviews/{kind}: optimistic by `base_ver`; a stale base → 409 REVISION_CONFLICT with the current review. */
+export const PutReviewRequest = z.strictObject({
+  base_ver: z.number().int().min(0),
+  marks_hash: Sha256.nullable(),
+  comment: z.string().max(LIMITS.comment),
+});
+export type PutReviewRequest = z.infer<typeof PutReviewRequest>;
+export const ReviewResponse = z.object({ review: PageReviewDTO });
+
+/** PUT /pages/{id}/typed-image: binds an uploaded typed page and marks the page «затайплена». */
+export const TypedImageRequest = z.strictObject({ hash: Sha256 });
+export type TypedImageRequest = z.infer<typeof TypedImageRequest>;
 
 export const SeenRequest = z.strictObject({ markup_rev: z.number().int().min(0) });
 export const TypedRequest = z.strictObject({ typed: z.boolean() });

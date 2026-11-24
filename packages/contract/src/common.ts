@@ -9,9 +9,10 @@ export const Sha256 = z.string().regex(/^[0-9a-f]{64}$/, 'sha256 lower-case hex'
 export const IsoDateTime = z.iso.datetime();
 
 const Px = z.number().int();
+/** Boxes may stick out of the page or lie fully outside it (ADR 0018); only the size must be positive. */
 export const Box = z.strictObject({
-  x: Px.min(0),
-  y: Px.min(0),
+  x: Px,
+  y: Px,
   w: Px.min(1),
   h: Px.min(1),
 });

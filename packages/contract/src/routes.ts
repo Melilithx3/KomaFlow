@@ -38,8 +38,8 @@ export const ROUTES: RouteDef[] = [
   },
   { method: 'GET', path: '/chapters/{id}', summary: 'Chapter with page summaries (ETag)', response: A.ChapterDetailResponse },
 
-  { method: 'POST', path: '/blobs/check', summary: 'Which blobs are missing', desktopOnly: true, body: A.BlobsCheckRequest, response: A.BlobsCheckResponse },
-  { method: 'PUT', path: '/blobs/{sha256}', summary: 'Upload blob (streaming)', desktopOnly: true, binary: 'request', response: A.BlobPutResponse },
+  { method: 'POST', path: '/blobs/check', summary: 'Which blobs are missing', body: A.BlobsCheckRequest, response: A.BlobsCheckResponse },
+  { method: 'PUT', path: '/blobs/{sha256}', summary: 'Upload blob (streaming; the web uploads typed pages and review marks, ADR 0021)', binary: 'request', response: A.BlobPutResponse },
   { method: 'GET', path: '/blobs/{sha256}', summary: 'Download blob (immutable)', binary: 'response' },
 
   { method: 'POST', path: '/chapters/{id}/sync', summary: 'Publish chapter markup', desktopOnly: true, body: A.SyncRequest, response: A.SyncResponse },
@@ -47,6 +47,8 @@ export const ROUTES: RouteDef[] = [
   { method: 'GET', path: '/pages/{id}', summary: 'Page with objects (ETag)', response: A.PageDetailResponse },
   { method: 'PUT', path: '/pages/{id}/seen', summary: 'Mark markup revision as seen', body: A.SeenRequest, response: A.OkResponse },
   { method: 'PUT', path: '/pages/{id}/typed', summary: 'Set the manual "typed" status', body: A.TypedRequest, response: A.PageResponse },
+  { method: 'PUT', path: '/pages/{id}/reviews/{kind}', summary: 'Save the editorial review (marks + comment) of the clean or the typed page', body: A.PutReviewRequest, response: A.ReviewResponse },
+  { method: 'PUT', path: '/pages/{id}/typed-image', summary: 'Bind an uploaded typed page image; marks the page typed', body: A.TypedImageRequest, response: A.PageResponse },
   { method: 'PATCH', path: '/objects/{id}', summary: 'Edit text data of an object', body: A.PatchObjectRequest },
 
   { method: 'POST', path: '/chapters/{id}/exports', summary: 'Start PSD export', body: A.CreateExportRequest, response: A.ExportResponse },

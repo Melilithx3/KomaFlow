@@ -85,8 +85,23 @@ export const PageDTO = z.object({
   typed: z.boolean(),
   typed_by: Id.nullable(),
   typed_at: IsoDateTime.nullable(),
+  /** Typed page image uploaded in «Редакция → Тайп» (ADR 0021); null = not uploaded. */
+  typed_hash: Sha256.nullable(),
 });
 export type PageDTO = z.infer<typeof PageDTO>;
+
+/** Editorial review of a page (ADR 0021): brush marks (transparent PNG over the image) and a comment. */
+export const ReviewKind = z.enum(['clean', 'type']);
+export type ReviewKind = z.infer<typeof ReviewKind>;
+export const PageReviewDTO = z.object({
+  kind: ReviewKind,
+  marks_hash: Sha256.nullable(),
+  comment: z.string(),
+  ver: z.number().int(),
+  updated_at: IsoDateTime.nullable(),
+  updated_by_name: z.string().nullable(),
+});
+export type PageReviewDTO = z.infer<typeof PageReviewDTO>;
 
 export const StateCounts = z.object({
   total: z.number().int(),
@@ -107,6 +122,7 @@ export const PageSummary = PageDTO.pick({
   markup_rev: true,
   rev: true,
   typed: true,
+  typed_hash: true,
 }).extend({
   has_clean: z.boolean(),
   counts: StateCounts,
